@@ -1,4 +1,5 @@
 <img width="596" height="410" alt="Screenshot 2026-02-20 093903" src="https://github.com/user-attachments/assets/a2a91462-7f99-41cc-a2d7-bcab812dcaf3" />
+
 BlockNetProject
 
 BlockNetProject is a lightweight "blob relay" designed to store and retrieve binary objects over HTTP. It includes a C++ core server/client, a PyQt5 management GUI, and Python-integrated blocks for seamless use in block-processing frameworks.
