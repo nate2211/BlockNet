@@ -12,12 +12,28 @@ block_cipher = None
 PROJECT_DIR = Path(os.getcwd()).resolve()
 
 datas = []
-blocknet_exe = PROJECT_DIR / "blocknet.exe"
-if blocknet_exe.exists():
-    # In onefile, datas are extracted at runtime into sys._MEIPASS
-    datas.append((str(blocknet_exe), "."))
-else:
-    print(f"[spec] WARNING: blocknet.exe not found at: {blocknet_exe}")
+binaries = []
+
+def add_data(src: Path, dest: str = ".") -> None:
+    if src.exists():
+        datas.append((str(src), dest))
+    else:
+        print(f"[spec] WARNING: data not found: {src}")
+
+def add_bin(src: Path, dest: str = ".") -> None:
+    if src.exists():
+        binaries.append((str(src), dest))
+    else:
+        print(f"[spec] WARNING: binary not found: {src}")
+
+# ---- bundle your native server exe (extracted to sys._MEIPASS in onefile) ----
+add_data(PROJECT_DIR / "blocknet.exe", ".")
+
+
+# ---- bundle OpenSSL DLLs (so blocknet.exe can find them next to itself) ----
+# If blocknet.exe depends on these at runtime, bundling them as *binaries* is correct.
+add_bin(PROJECT_DIR / "libcrypto-3-x64.dll", ".")
+add_bin(PROJECT_DIR / "libssl-3-x64.dll", ".")
 
 hiddenimports = []
 hiddenimports += collect_submodules("PyQt5")
@@ -26,7 +42,7 @@ datas += collect_data_files("PyQt5", include_py_files=False)
 a = Analysis(
     ["gui.py"],
     pathex=[str(PROJECT_DIR)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
