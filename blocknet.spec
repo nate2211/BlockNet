@@ -34,6 +34,7 @@ add_data(PROJECT_DIR / "blocknet.exe", ".")
 # If blocknet.exe depends on these at runtime, bundling them as *binaries* is correct.
 add_bin(PROJECT_DIR / "libcrypto-3-x64.dll", ".")
 add_bin(PROJECT_DIR / "libssl-3-x64.dll", ".")
+add_bin(PROJECT_DIR / "randomx-dll.dll", ".")
 
 hiddenimports = []
 hiddenimports += collect_submodules("PyQt5")
