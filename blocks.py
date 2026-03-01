@@ -446,6 +446,78 @@ class BlockNetRandomXHashBatchBlock(BaseBlock):
 
 
 BLOCKS.register("blocknet_randomx_hash_batch", BlockNetRandomXHashBatchBlock)
+
+@dataclass
+class BlockNetRandomXScanBlock(BaseBlock):
+    """
+    POST /randomx/scan
+
+    Payload:
+      - dict: full request body (recommended)
+      - bytes: treated as blob (blob_b64)
+      - str: treated as blob_hex if hex-looking else blob_b64(utf8)
+
+    Params:
+      relay, token, api_prefix
+      seed_hex (required unless in payload dict)
+      nonce_offset (default 39)
+      start_nonce (default 0)
+      iters (default 200000)
+      target64 (required unless in payload dict)
+      max_results (default 4)
+    """
+    def execute(self, payload: Any, *, params: Dict[str, Any]) -> Tuple[Any, Dict[str, Any]]:
+        relay = str(params.get("relay", "127.0.0.1:38888"))
+        token = str(params.get("token", ""))
+        pfx = _api_prefix(params)
+
+        # If caller gave dict, pass through (fill missing from params)
+        if isinstance(payload, dict):
+            body: Dict[str, Any] = dict(payload)
+        else:
+            body = {}
+
+        # seed_hex
+        if "seed_hex" not in body:
+            seed_hex = str(params.get("seed_hex", "")).strip()
+            if not seed_hex:
+                return "", {"ok": False, "error": "missing seed_hex (param or payload dict)"}
+            body["seed_hex"] = seed_hex
+
+        # target64
+        if "target64" not in body:
+            if "target64" in params:
+                body["target64"] = int(params.get("target64"))
+            else:
+                return "", {"ok": False, "error": "missing target64 (param or payload dict)"}
+
+        # convenience blob fill if not provided
+        if "blob_hex" not in body and "blob_b64" not in body:
+            if isinstance(payload, (bytes, bytearray)):
+                body["blob_b64"] = _b64_bytes(bytes(payload))
+            elif payload is not None and not isinstance(payload, dict):
+                s = str(payload).strip()
+                is_hex = all(c in "0123456789abcdefABCDEF" for c in s) and (len(s) % 2 == 0) and len(s) > 0
+                if is_hex:
+                    body["blob_hex"] = s
+                else:
+                    body["blob_b64"] = _b64_bytes(s.encode("utf-8", errors="replace"))
+
+        # defaults / optional knobs
+        body.setdefault("nonce_offset", int(params.get("nonce_offset", 39)))
+        body.setdefault("start_nonce", int(params.get("start_nonce", 0)))
+        body.setdefault("iters", int(params.get("iters", 200000)))
+        body.setdefault("max_results", int(params.get("max_results", 4)))
+
+        cli = BlockNetClient(relay=relay, token=token)
+        j = cli.api_randomx_scan(body, prefix=pfx)
+
+        # pipeline-friendly output: found list if present
+        out = j.get("found", j)
+        return out, {"ok": bool(j.get("ok", False)), "response": j}
+
+
+BLOCKS.register("blocknet_randomx_scan", BlockNetRandomXScanBlock)
 @dataclass
 class BlockNetWebFetchBlock(BaseBlock):
     """
@@ -720,3 +792,54 @@ class BlockNetP2PoolCloseBlock(BaseBlock):
 
 
 BLOCKS.register("blocknet_p2pool_close", BlockNetP2PoolCloseBlock)
+
+@dataclass
+class BlockNetP2PoolScanBlock(BaseBlock):
+    """
+    POST /p2pool/scan
+
+    Payload:
+      - str: session token
+      - dict: full request body {session, start_nonce, iters, max_results, nonce_offset, poll_first}
+
+    Params:
+      relay, token, api_prefix
+      session (if payload is not session)
+      start_nonce (default 0)
+      iters (default 200000)
+      max_results (default 4)
+      nonce_offset (default 39)
+      poll_first (default False)
+    """
+    def execute(self, payload: Any, *, params: Dict[str, Any]) -> Tuple[Any, Dict[str, Any]]:
+        relay = str(params.get("relay", "127.0.0.1:38888"))
+        token = str(params.get("token", ""))
+        pfx = _api_prefix(params)
+
+        if isinstance(payload, dict):
+            body: Dict[str, Any] = dict(payload)
+        else:
+            sess = str(payload or "").strip()
+            if not sess:
+                sess = str(params.get("session", "")).strip()
+            body = {"session": sess}
+
+        if not str(body.get("session", "")).strip():
+            return "", {"ok": False, "error": "missing session"}
+
+        # optional knobs
+        body.setdefault("start_nonce", int(params.get("start_nonce", 0)))
+        body.setdefault("iters", int(params.get("iters", 200000)))
+        body.setdefault("max_results", int(params.get("max_results", 4)))
+        body.setdefault("nonce_offset", int(params.get("nonce_offset", 39)))
+        body.setdefault("poll_first", bool(params.get("poll_first", False)))
+
+        cli = BlockNetClient(relay=relay, token=token)
+        j = cli.api_p2pool_scan(body, prefix=pfx)
+
+        # pipeline-friendly output: found list if present
+        out = j.get("found", j)
+        return out, {"ok": bool(j.get("ok", False)), "response": j}
+
+
+BLOCKS.register("blocknet_p2pool_scan", BlockNetP2PoolScanBlock)
