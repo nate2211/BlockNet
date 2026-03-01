@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QPlainTextEdit, QFormLayout, QGroupBox,
     QMessageBox, QSplitter, QTabWidget,
-    QCheckBox, QComboBox, QFileDialog, QSizePolicy, QSpinBox, QScrollArea
+    QCheckBox, QComboBox, QFileDialog, QSpinBox, QScrollArea
 )
 
 from blocknet_client import BlockNetClient
@@ -155,7 +155,7 @@ def apply_dark_theme(app: QApplication) -> None:
             margin-top: 2px;
             margin-bottom: 2px;
             border-radius: 5px;
-        }
+            }
     """)
 
 
@@ -183,13 +183,6 @@ def _b64e(b: bytes) -> str:
 
 def _b64d(s: str) -> bytes:
     return base64.b64decode(s.encode("ascii"))
-
-
-def _safe_int(s: str, default: int) -> int:
-    try:
-        return int(str(s).strip())
-    except Exception:
-        return default
 
 
 def _maybe_json_value(text: str) -> Any:
@@ -268,7 +261,7 @@ class MainWindow(QMainWindow):
         self.main_split.setHandleWidth(10)
         root.addWidget(self.main_split, 1)
 
-        # LEFT: tabs (so we can fit a lot of options cleanly)
+        # LEFT: tabs
         self.left_tabs = QTabWidget()
         self.left_tabs.setMinimumWidth(420)
         self.main_split.addWidget(self.left_tabs)
@@ -322,6 +315,14 @@ class MainWindow(QMainWindow):
         self.ed_token = QLineEdit("")
         self.ed_token.setEchoMode(QLineEdit.Password)
         self.ed_spool = QLineEdit(_default_spool_dir())
+
+        # NEW: thread count for blocknet.exe
+        self.sp_threads = QSpinBox()
+        self.sp_threads.setRange(0, 4096)
+        self.sp_threads.setValue(0)  # 0 = use BlockNet default/auto
+        self.ed_threads_flag = QLineEdit("--threads")
+        self.ed_threads_flag.setPlaceholderText("e.g. --threads or -t (leave default if unsure)")
+
         self.ed_server_extra = QLineEdit("")
         self.ed_server_extra.setPlaceholderText('extra args (optional), e.g. --log-level info')
 
@@ -330,6 +331,8 @@ class MainWindow(QMainWindow):
         fl.addRow("Relay (host:port)", self.ed_relay)
         fl.addRow("Token", self.ed_token)
         fl.addRow("Spool dir", self.ed_spool)
+        fl.addRow("Threads (0=auto)", self.sp_threads)
+        fl.addRow("Threads flag", self.ed_threads_flag)
         fl.addRow("Server extra", self.ed_server_extra)
 
         btn_row = QHBoxLayout()
@@ -354,8 +357,6 @@ class MainWindow(QMainWindow):
         self.btn_start.clicked.connect(self._start_server)
         self.btn_stop.clicked.connect(self._stop_server)
         self.btn_stats.clicked.connect(self._poll_stats)
-        # txt_out/txt_log created later, so connect after right tabs exist
-        # (we will re-bind in _build_right_output_tabs)
 
         lay.addWidget(gb)
 
@@ -517,6 +518,10 @@ class MainWindow(QMainWindow):
         self.cb_api_p2pool = QCheckBox("Enable P2Pool API (--api-p2pool on)")
         self.cb_api_p2pool.setChecked(False)
 
+        # NEW: extra args passed only when p2pool api enabled
+        self.ed_p2pool_extra = QLineEdit("")
+        self.ed_p2pool_extra.setPlaceholderText("extra p2pool args (optional), passed to BlockNet when --api-p2pool on")
+
         fl.addRow(self.cb_api)
         fl.addRow("API prefix", self.ed_api_prefix)
         fl.addRow(self.cb_api_media)
@@ -524,12 +529,13 @@ class MainWindow(QMainWindow):
         fl.addRow("RandomX DLL", _hbox(self.ed_randomx_dll, self.btn_randomx_dll))
         fl.addRow(self.cb_api_web)
         fl.addRow(self.cb_api_p2pool)
+        fl.addRow("P2Pool extra", self.ed_p2pool_extra)
 
         self.btn_randomx_dll.clicked.connect(lambda: self._browse_file_into(self.ed_randomx_dll))
 
         lay.addWidget(gb)
 
-        # Web API safety tuning (only a few high-impact knobs)
+        # Web API safety tuning
         gbw = QGroupBox("Web API Safety / Limits")
         wfl = QFormLayout(gbw)
 
@@ -614,7 +620,6 @@ class MainWindow(QMainWindow):
         self.btn_clear_log.clicked.connect(lambda: self.txt_log.setPlainText(""))
 
     def _build_right_api_tabs(self) -> None:
-        # TextToVec tab
         self.right_tabs.addTab(self._tab_texttovec(), "API: TextToVec")
         self.right_tabs.addTab(self._tab_vectortext(), "API: VectorText")
         self.right_tabs.addTab(self._tab_web(), "API: Web")
@@ -683,8 +688,8 @@ class MainWindow(QMainWindow):
         self.vtxt_lexicon_key = QLineEdit("")
         self.vtxt_context_key = QLineEdit("")
 
-        self.vtxt_idf = QLineEdit("")     # you asked: accept idf
-        self.vtxt_tokens = QLineEdit("")  # you asked: accept tokens
+        self.vtxt_idf = QLineEdit("")
+        self.vtxt_tokens = QLineEdit("")
 
         self.vtxt_lexicon_inline = QPlainTextEdit()
         self.vtxt_lexicon_inline.setFont(self.mono)
@@ -788,7 +793,7 @@ class MainWindow(QMainWindow):
         fl2.addRow("max_scripts", self.webjs_max_scripts)
         fl2.addRow(self.btn_web_js)
 
-        # ---------------- /web/links (NEW) ----------------
+        # ---------------- /web/links ----------------
         gb3 = QGroupBox("POST /v1/web/links")
         fl3 = QFormLayout(gb3)
 
@@ -809,7 +814,7 @@ class MainWindow(QMainWindow):
         fl3.addRow("max_links", self.weblinks_max)
         fl3.addRow(self.btn_web_links)
 
-        # ---------------- /web/rss_find (NEW) ----------------
+        # ---------------- /web/rss_find ----------------
         gb4 = QGroupBox("POST /v1/web/rss_find")
         fl4 = QFormLayout(gb4)
 
@@ -844,7 +849,12 @@ class MainWindow(QMainWindow):
 
         self.img_path = QLineEdit("")
         self.btn_img_browse = QPushButton("Browse…")
-        self.btn_img_browse.clicked.connect(lambda: self._browse_file_into(self.img_path, filter_str="Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;All files (*.*)"))
+        self.btn_img_browse.clicked.connect(
+            lambda: self._browse_file_into(
+                self.img_path,
+                filter_str="Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;All files (*.*)"
+            )
+        )
 
         self.img_dim = QSpinBox()
         self.img_dim.setRange(1, 32768)
@@ -872,7 +882,12 @@ class MainWindow(QMainWindow):
 
         self.vid_path = QLineEdit("")
         self.btn_vid_browse = QPushButton("Browse…")
-        self.btn_vid_browse.clicked.connect(lambda: self._browse_file_into(self.vid_path, filter_str="Videos (*.mp4 *.mkv *.webm *.mov *.avi);;All files (*.*)"))
+        self.btn_vid_browse.clicked.connect(
+            lambda: self._browse_file_into(
+                self.vid_path,
+                filter_str="Videos (*.mp4 *.mkv *.webm *.mov *.avi);;All files (*.*)"
+            )
+        )
 
         self.vid_dim = QSpinBox()
         self.vid_dim.setRange(1, 32768)
@@ -901,6 +916,7 @@ class MainWindow(QMainWindow):
 
         lay.addWidget(gbi)
         lay.addWidget(gbv)
+
         self.media_out = self._mk_api_out()
         lay.addWidget(self.media_out, 1)
         return tab
@@ -934,14 +950,12 @@ class MainWindow(QMainWindow):
         fl.addRow("data", self.rx_data)
         fl.addRow(self.btn_rxhash)
 
-        # NEW: Batch hashing
+        # Batch hashing
         gb3 = QGroupBox("POST /v1/randomx/hash_batch")
         flb = QFormLayout(gb3)
 
         self.rx_batch_items = QPlainTextEdit()
         self.rx_batch_items.setFont(self.mono)
-
-        # You can paste a JSON array (items) OR a full object body.
         self.rx_batch_items.setPlainText(json.dumps([
             {"data_hex": "00"},
             {"data_hex": "ff"}
@@ -964,6 +978,27 @@ class MainWindow(QMainWindow):
     def _tab_p2pool(self) -> QWidget:
         tab = QWidget()
         lay = QVBoxLayout(tab)
+
+        # NEW: open params patch (UI + optional body)
+        gb0 = QGroupBox("Open session params (optional)")
+        fl0 = QFormLayout(gb0)
+
+        self.p2_open_host = QLineEdit("")
+        self.p2_open_wallet = QLineEdit("")
+        self.p2_open_rig = QLineEdit("")
+        self.p2_open_threads = QSpinBox()
+        self.p2_open_threads.setRange(0, 4096)
+        self.p2_open_threads.setValue(0)
+
+        self.p2_open_extra_json = QPlainTextEdit()
+        self.p2_open_extra_json.setFont(self.mono)
+        self.p2_open_extra_json.setPlaceholderText('Optional JSON object merged into /p2pool/open body, e.g. {"mini": true}')
+
+        fl0.addRow("host (optional)", self.p2_open_host)
+        fl0.addRow("wallet (optional)", self.p2_open_wallet)
+        fl0.addRow("rig_id (optional)", self.p2_open_rig)
+        fl0.addRow("threads (0=default)", self.p2_open_threads)
+        fl0.addRow("extra JSON (object)", self.p2_open_extra_json)
 
         gb = QGroupBox("P2Pool API (session-based)")
         fl = QFormLayout(gb)
@@ -1003,8 +1038,10 @@ class MainWindow(QMainWindow):
         fl2.addRow("payload (JSON)", self.p2_submit_json)
         fl2.addRow(self.btn_p2_submit)
 
+        lay.addWidget(gb0)
         lay.addWidget(gb)
         lay.addWidget(gb2)
+
         self.p2_out = self._mk_api_out()
         lay.addWidget(self.p2_out, 1)
         return tab
@@ -1056,18 +1093,24 @@ class MainWindow(QMainWindow):
     def _sync_relay_from_host_port(self) -> None:
         host = self.ed_host.text().strip() or "127.0.0.1"
         port = self.ed_port.text().strip() or "38888"
-        # keep relay editable, but sync when host/port are edited
         self.ed_relay.setText(f"{host}:{port}")
 
     def _wire_autosave(self) -> None:
         edits = [
-            self.ed_host, self.ed_port, self.ed_relay, self.ed_token, self.ed_spool, self.ed_server_extra,
+            self.ed_host, self.ed_port, self.ed_relay, self.ed_token, self.ed_spool,
+            self.ed_threads_flag,  # NEW
+            self.ed_server_extra,
+
             self.ed_proxy_listen, self.ed_proxy_backend, self.ed_proxy_cert, self.ed_proxy_key,
             self.ed_proxy_inject, self.ed_proxy_allow,
+
             self.ed_gateway_listen, self.ed_gateway_backend, self.ed_gateway_cert, self.ed_gateway_key,
             self.ed_gateway_allow, self.ed_gateway_extra,
+
             self.ed_key, self.ed_mime, self.ed_put, self.ed_get,
+
             self.ed_api_prefix, self.ed_randomx_dll, self.ed_web_ua,
+            self.ed_p2pool_extra,  # NEW
         ]
         for e in edits:
             e.textChanged.connect(self._schedule_save)
@@ -1075,8 +1118,13 @@ class MainWindow(QMainWindow):
         self.ed_host.textChanged.connect(self._sync_relay_from_host_port)
         self.ed_port.textChanged.connect(self._sync_relay_from_host_port)
 
-        for cb in (self.cb_proxy, self.cb_gateway, self.cb_api, self.cb_api_media, self.cb_api_randomx, self.cb_api_web, self.cb_api_p2pool,
-                   self.cb_web_block_private, self.cb_web_allow_http, self.cb_web_allow_https):
+        self.sp_threads.valueChanged.connect(self._schedule_save)  # NEW
+
+        for cb in (
+            self.cb_proxy, self.cb_gateway,
+            self.cb_api, self.cb_api_media, self.cb_api_randomx, self.cb_api_web, self.cb_api_p2pool,
+            self.cb_web_block_private, self.cb_web_allow_http, self.cb_web_allow_https
+        ):
             cb.stateChanged.connect(self._schedule_save)
 
         for cmb in (self.cmb_proxy_log, self.cmb_gateway_log):
@@ -1084,6 +1132,13 @@ class MainWindow(QMainWindow):
 
         for sp in (self.sp_web_timeout, self.sp_web_max_page_kb, self.sp_web_max_scripts):
             sp.valueChanged.connect(self._schedule_save)
+
+        # NEW: persist p2pool open defaults
+        self.p2_open_host.textChanged.connect(self._schedule_save)
+        self.p2_open_wallet.textChanged.connect(self._schedule_save)
+        self.p2_open_rig.textChanged.connect(self._schedule_save)
+        self.p2_open_threads.valueChanged.connect(self._schedule_save)
+        self.p2_open_extra_json.textChanged.connect(self._schedule_save)
 
     def _browse_file_into(self, edit: QLineEdit, filter_str: str = "All files (*.*)") -> None:
         start_dir = str(Path.home())
@@ -1155,6 +1210,38 @@ class MainWindow(QMainWindow):
             out.append("".join(cur))
         return out
 
+    def _append_threads_args(self, args: list, threads: int, flag_str: str) -> None:
+        """
+        Add the thread count CLI args in a robust way.
+
+        - If flag_str is "--threads" or "-t" => add ["--threads", "N"]
+        - If flag_str contains spaces => split and append, then append N
+        - If flag_str is like "--threads=" => append "--threads=N"
+        - If flag_str is like "--threads=8" => append as-is (and ignore threads spinner)
+        """
+        if threads <= 0:
+            return
+
+        fs = (flag_str or "").strip()
+        if not fs:
+            fs = "--threads"
+
+        toks = self._split_extra_args(fs)
+        if not toks:
+            toks = ["--threads"]
+
+        # If user provided --flag=value already, trust it
+        if len(toks) == 1 and "=" in toks[0]:
+            k, v = toks[0].split("=", 1)
+            if v.strip() == "":
+                args.append(f"{k}={threads}")
+            else:
+                args.append(toks[0])
+            return
+
+        args.extend(toks)
+        args.append(str(threads))
+
     # -------- stdout/stderr routing --------
 
     def _classify_line(self, line: str) -> Tuple[bool, bool, Optional[str], str]:
@@ -1224,71 +1311,6 @@ class MainWindow(QMainWindow):
                 self._append_plain(self.txt_proxy, cleaned, prefix="[stderr] " if is_stderr else "")
                 self._append_plain(self.txt_gateway, cleaned, prefix="[stderr] " if is_stderr else "")
 
-    def _do_randomx_hash_batch(self) -> None:
-        try:
-            seed_hex = self.rx_seed_hex.text().strip()
-            if not seed_hex:
-                raise ValueError("seed_hex required")
-
-            raw = (self.rx_batch_items.toPlainText() or "").strip()
-            if not raw:
-                raise ValueError("items JSON required")
-
-            parsed = json.loads(raw)
-
-            # allow either: JSON array => items, or JSON object => full body
-            if isinstance(parsed, list):
-                body: Dict[str, Any] = {"seed_hex": seed_hex, "items": parsed}
-            elif isinstance(parsed, dict):
-                body = dict(parsed)
-                body.setdefault("seed_hex", seed_hex)
-                if "items" not in body or not isinstance(body["items"], list):
-                    raise ValueError("body must include items[] (JSON array)")
-            else:
-                raise ValueError("JSON must be an array (items) or object (full body)")
-
-            j = self._client().api_randomx_hash_batch(body, prefix=self._api_prefix())
-            self.rx_out.setPlainText("")
-            self._append_json(self.rx_out, j)
-
-        except Exception as e:
-            self._append_plain(self.rx_out, f"randomx hash_batch error: {e}")
-    def _do_web_links(self) -> None:
-        try:
-            filt = self.weblinks_filter.currentText().strip().lower()
-
-            body: Dict[str, Any] = {
-                "url": self.weblinks_url.text().strip(),
-                "max_links": int(self.weblinks_max.value()),
-            }
-
-            # These flags are what your C++ route should read.
-            # If you named them differently in C++, rename here to match.
-            if filt == "same-origin":
-                body["same_origin"] = True
-            elif filt == "external-only":
-                body["external_only"] = True
-
-            j = self._client().api_web_links(body, prefix=self._api_prefix())
-            self.web_out.setPlainText("")
-            self._append_json(self.web_out, j)
-        except Exception as e:
-            self._append_plain(self.web_out, f"web/links error: {e}")
-
-    def _do_web_rss_find(self) -> None:
-        try:
-            body = {
-                "url": self.webrss_url.text().strip(),
-                "max_feeds": int(self.webrss_max.value()),
-            }
-
-            # If your C++ route uses a different param name (ex: max_urls),
-            # rename "max_feeds" here to match.
-            j = self._client().api_web_rss_find(body, prefix=self._api_prefix())
-            self.web_out.setPlainText("")
-            self._append_json(self.web_out, j)
-        except Exception as e:
-            self._append_plain(self.web_out, f"web/rss_find error: {e}")
     def _read_stdout(self) -> None:
         data = bytes(self.proc.readAllStandardOutput()).decode("utf-8", errors="replace")
         if data.strip():
@@ -1338,6 +1360,12 @@ class MainWindow(QMainWindow):
         token = self.ed_token.text().strip()
 
         args = ["serve", "--listen", relay, "--spool", spool]
+
+        # NEW: threads
+        th = int(self.sp_threads.value())
+        if th > 0:
+            self._append_threads_args(args, th, self.ed_threads_flag.text())
+
         if token:
             args += ["--token", token]
 
@@ -1354,8 +1382,7 @@ class MainWindow(QMainWindow):
                     args += ["--api-randomx-dll", dll]
             if self.cb_api_web.isChecked():
                 args += ["--api-web", "on"]
-                # optional web knobs if your server supports them (safe to pass only if you implemented flags)
-                # If you didn't implement these flags in C++, remove these lines.
+                # optional web knobs if your server supports them
                 args += ["--api-web-block-private", "on" if self.cb_web_block_private.isChecked() else "off"]
                 args += ["--api-web-allow-http", "on" if self.cb_web_allow_http.isChecked() else "off"]
                 args += ["--api-web-allow-https", "on" if self.cb_web_allow_https.isChecked() else "off"]
@@ -1367,6 +1394,7 @@ class MainWindow(QMainWindow):
                     args += ["--api-web-ua", ua]
             if self.cb_api_p2pool.isChecked():
                 args += ["--api-p2pool", "on"]
+                args += self._split_extra_args(self.ed_p2pool_extra.text())
 
         # Proxy/Gateway
         proxy_on = bool(self.cb_proxy.isChecked())
@@ -1561,7 +1589,6 @@ class MainWindow(QMainWindow):
                 "topk": int(self.vtxt_topk.value()),
             }
 
-            # idf/tokens: allow JSON or plain string
             idf_txt = self.vtxt_idf.text().strip()
             if idf_txt:
                 body["idf"] = _maybe_json_value(idf_txt)
@@ -1626,6 +1653,39 @@ class MainWindow(QMainWindow):
             self._append_json(self.web_out, j)
         except Exception as e:
             self._append_plain(self.web_out, f"web/js error: {e}")
+
+    def _do_web_links(self) -> None:
+        try:
+            filt = self.weblinks_filter.currentText().strip().lower()
+
+            body: Dict[str, Any] = {
+                "url": self.weblinks_url.text().strip(),
+                "max_links": int(self.weblinks_max.value()),
+            }
+
+            # These flags are what your C++ route should read.
+            if filt == "same-origin":
+                body["same_origin"] = True
+            elif filt == "external-only":
+                body["external_only"] = True
+
+            j = self._client().api_web_links(body, prefix=self._api_prefix())
+            self.web_out.setPlainText("")
+            self._append_json(self.web_out, j)
+        except Exception as e:
+            self._append_plain(self.web_out, f"web/links error: {e}")
+
+    def _do_web_rss_find(self) -> None:
+        try:
+            body = {
+                "url": self.webrss_url.text().strip(),
+                "max_feeds": int(self.webrss_max.value()),
+            }
+            j = self._client().api_web_rss_find(body, prefix=self._api_prefix())
+            self.web_out.setPlainText("")
+            self._append_json(self.web_out, j)
+        except Exception as e:
+            self._append_plain(self.web_out, f"web/rss_find error: {e}")
 
     def _do_imagetovec(self) -> None:
         try:
@@ -1696,6 +1756,35 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._append_plain(self.rx_out, f"randomx hash error: {e}")
 
+    def _do_randomx_hash_batch(self) -> None:
+        try:
+            seed_hex = self.rx_seed_hex.text().strip()
+            if not seed_hex:
+                raise ValueError("seed_hex required")
+
+            raw = (self.rx_batch_items.toPlainText() or "").strip()
+            if not raw:
+                raise ValueError("items JSON required")
+
+            parsed = json.loads(raw)
+
+            # allow either: JSON array => items, or JSON object => full body
+            if isinstance(parsed, list):
+                body: Dict[str, Any] = {"seed_hex": seed_hex, "items": parsed}
+            elif isinstance(parsed, dict):
+                body = dict(parsed)
+                body.setdefault("seed_hex", seed_hex)
+                if "items" not in body or not isinstance(body["items"], list):
+                    raise ValueError("body must include items[] (JSON array)")
+            else:
+                raise ValueError("JSON must be an array (items) or object (full body)")
+
+            j = self._client().api_randomx_hash_batch(body, prefix=self._api_prefix())
+            self.rx_out.setPlainText("")
+            self._append_json(self.rx_out, j)
+        except Exception as e:
+            self._append_plain(self.rx_out, f"randomx hash_batch error: {e}")
+
     def _do_web_example(self) -> None:
         self.web_url.setText("https://example.com")
         self.web_mode.setCurrentText("text")
@@ -1705,7 +1794,36 @@ class MainWindow(QMainWindow):
     # P2Pool
     def _do_p2pool_open(self) -> None:
         try:
-            j = self._client().api_p2pool_open(prefix=self._api_prefix())
+            # Build optional open params body (patch)
+            body: Dict[str, Any] = {}
+
+            host = self.p2_open_host.text().strip()
+            wallet = self.p2_open_wallet.text().strip()
+            rig = self.p2_open_rig.text().strip()
+            th = int(self.p2_open_threads.value())
+            if host:
+                body["host"] = host
+            if wallet:
+                body["wallet"] = wallet
+            if rig:
+                body["rig_id"] = rig
+            if th > 0:
+                body["threads"] = th
+
+            raw_extra = (self.p2_open_extra_json.toPlainText() or "").strip()
+            if raw_extra:
+                extra = json.loads(raw_extra)
+                if not isinstance(extra, dict):
+                    raise ValueError("extra JSON must be an object")
+                body.update(extra)
+
+            cli = self._client()
+            # Try calling with a body if your BlockNetClient supports it; otherwise fall back.
+            try:
+                j = cli.api_p2pool_open(body, prefix=self._api_prefix()) if body else cli.api_p2pool_open(prefix=self._api_prefix())
+            except TypeError:
+                j = cli.api_p2pool_open(prefix=self._api_prefix())
+
             self.p2_out.setPlainText("")
             self._append_json(self.p2_out, j)
             sess = (j.get("session") or j.get("id") or "")
@@ -1788,6 +1906,13 @@ class MainWindow(QMainWindow):
             self.ed_port.setText(j.get("port", self.ed_port.text()))
             self.ed_server_extra.setText(j.get("server_extra", self.ed_server_extra.text()))
 
+            # NEW: threads
+            try:
+                self.sp_threads.setValue(int(j.get("threads", self.sp_threads.value())))
+            except Exception:
+                pass
+            self.ed_threads_flag.setText(j.get("threads_flag", self.ed_threads_flag.text()))
+
             self.cb_proxy.setChecked(bool(j.get("proxy_enabled", False)))
             self.ed_proxy_listen.setText(j.get("proxy_listen", self.ed_proxy_listen.text()))
             self.ed_proxy_backend.setText(j.get("proxy_backend", self.ed_proxy_backend.text()))
@@ -1820,6 +1945,7 @@ class MainWindow(QMainWindow):
             self.cb_api_web.setChecked(bool(j.get("api_web", True)))
             self.cb_api_p2pool.setChecked(bool(j.get("api_p2pool", False)))
             self.ed_randomx_dll.setText(j.get("randomx_dll", self.ed_randomx_dll.text()))
+            self.ed_p2pool_extra.setText(j.get("p2pool_extra", self.ed_p2pool_extra.text()))
 
             self.cb_web_block_private.setChecked(bool(j.get("web_block_private", True)))
             self.cb_web_allow_http.setChecked(bool(j.get("web_allow_http", True)))
@@ -1828,6 +1954,16 @@ class MainWindow(QMainWindow):
             self.sp_web_max_page_kb.setValue(int(j.get("web_max_page_kb", self.sp_web_max_page_kb.value())))
             self.sp_web_max_scripts.setValue(int(j.get("web_max_scripts", self.sp_web_max_scripts.value())))
             self.ed_web_ua.setText(j.get("web_ua", self.ed_web_ua.text()))
+
+            # NEW: p2pool open defaults
+            self.p2_open_host.setText(j.get("p2_open_host", self.p2_open_host.text()))
+            self.p2_open_wallet.setText(j.get("p2_open_wallet", self.p2_open_wallet.text()))
+            self.p2_open_rig.setText(j.get("p2_open_rig", self.p2_open_rig.text()))
+            try:
+                self.p2_open_threads.setValue(int(j.get("p2_open_threads", self.p2_open_threads.value())))
+            except Exception:
+                pass
+            self.p2_open_extra_json.setPlainText(j.get("p2_open_extra_json", self.p2_open_extra_json.toPlainText()))
 
             # splitter state
             try:
@@ -1862,6 +1998,10 @@ class MainWindow(QMainWindow):
                 "port": self.ed_port.text().strip(),
                 "server_extra": self.ed_server_extra.text().strip(),
 
+                # NEW: threads
+                "threads": int(self.sp_threads.value()),
+                "threads_flag": self.ed_threads_flag.text().strip(),
+
                 "proxy_enabled": bool(self.cb_proxy.isChecked()),
                 "proxy_listen": self.ed_proxy_listen.text().strip(),
                 "proxy_backend": self.ed_proxy_backend.text().strip(),
@@ -1887,6 +2027,7 @@ class MainWindow(QMainWindow):
                 "api_web": bool(self.cb_api_web.isChecked()),
                 "api_p2pool": bool(self.cb_api_p2pool.isChecked()),
                 "randomx_dll": self.ed_randomx_dll.text().strip(),
+                "p2pool_extra": self.ed_p2pool_extra.text().strip(),
 
                 "web_block_private": bool(self.cb_web_block_private.isChecked()),
                 "web_allow_http": bool(self.cb_web_allow_http.isChecked()),
@@ -1895,6 +2036,13 @@ class MainWindow(QMainWindow):
                 "web_max_page_kb": int(self.sp_web_max_page_kb.value()),
                 "web_max_scripts": int(self.sp_web_max_scripts.value()),
                 "web_ua": self.ed_web_ua.text().strip(),
+
+                # NEW: p2pool open defaults
+                "p2_open_host": self.p2_open_host.text().strip(),
+                "p2_open_wallet": self.p2_open_wallet.text().strip(),
+                "p2_open_rig": self.p2_open_rig.text().strip(),
+                "p2_open_threads": int(self.p2_open_threads.value()),
+                "p2_open_extra_json": self.p2_open_extra_json.toPlainText(),
 
                 "main_split_state": _b64e(bytes(self.main_split.saveState())),
                 "left_tab": int(self.left_tabs.currentIndex()),
