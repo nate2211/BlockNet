@@ -6,6 +6,8 @@ import json
 import os
 import secrets
 import sys
+import http.client
+import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -201,6 +203,19 @@ def _maybe_json_value(text: str) -> Any:
     return t
 
 
+def _parse_relay_host_port(relay: str) -> Tuple[str, int]:
+    r = (relay or "").strip()
+    if not r:
+        return "127.0.0.1", 38888
+    # allow "http://host:port" or "host:port"
+    if "://" not in r:
+        r = "http://" + r
+    u = urllib.parse.urlsplit(r)
+    host = u.hostname or "127.0.0.1"
+    port = u.port or 80
+    return host, int(port)
+
+
 # ----------------------------- GUI -----------------------------------------------
 
 class MainWindow(QMainWindow):
@@ -209,7 +224,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("BlockNet Control Panel")
 
         # Used to keep multi-line log chunks routed consistently
-        self._last_ctx: Optional[str] = None  # "proxy" | "gateway" | None
+        self._last_ctx: Optional[str] = None  # "proxy" | "gateway" | "network" | None
 
         # process
         self.proc = QProcess(self)
@@ -316,7 +331,7 @@ class MainWindow(QMainWindow):
         self.ed_token.setEchoMode(QLineEdit.Password)
         self.ed_spool = QLineEdit(_default_spool_dir())
 
-        # NEW: thread count for blocknet.exe
+        # thread count for blocknet.exe
         self.sp_threads = QSpinBox()
         self.sp_threads.setRange(0, 4096)
         self.sp_threads.setValue(0)  # 0 = use BlockNet default/auto
@@ -348,9 +363,11 @@ class MainWindow(QMainWindow):
         self.btn_stats = QPushButton("Fetch Stats")
         self.btn_clear_out = QPushButton("Clear Output")
         self.btn_clear_log = QPushButton("Clear Console")
+        self.btn_clear_net = QPushButton("Clear Network")
         btn_row2.addWidget(self.btn_stats)
         btn_row2.addWidget(self.btn_clear_out)
         btn_row2.addWidget(self.btn_clear_log)
+        btn_row2.addWidget(self.btn_clear_net)
         fl.addRow(btn_row2)
 
         self.btn_gen.clicked.connect(self._gen_token)
@@ -365,14 +382,17 @@ class MainWindow(QMainWindow):
         l2 = QVBoxLayout(gb2)
         self.btn_api_ping = QPushButton("API: /v1/ping")
         self.btn_rx_status = QPushButton("API: RandomX status")
+        self.btn_net_status = QPushButton("API: Network status")
         self.btn_web_test = QPushButton("API: Web fetch (example.com)")
         l2.addWidget(self.btn_api_ping)
         l2.addWidget(self.btn_rx_status)
+        l2.addWidget(self.btn_net_status)
         l2.addWidget(self.btn_web_test)
         lay.addWidget(gb2)
 
         self.btn_api_ping.clicked.connect(self._do_api_ping)
         self.btn_rx_status.clicked.connect(self._do_randomx_status)
+        self.btn_net_status.clicked.connect(self._do_network_status)
         self.btn_web_test.clicked.connect(self._do_web_example)
 
         lay.addStretch(1)
@@ -518,7 +538,18 @@ class MainWindow(QMainWindow):
         self.cb_api_p2pool = QCheckBox("Enable P2Pool API (--api-p2pool on)")
         self.cb_api_p2pool.setChecked(False)
 
-        # NEW: extra args passed only when p2pool api enabled
+        # NEW: Network API
+        self.cb_api_network = QCheckBox("Enable Network API (--api-network on)")
+        self.cb_api_network.setChecked(True)
+        self.ed_network_wintun_dll = QLineEdit("wintun.dll")
+        self.btn_network_wintun_dll = QPushButton("Browse…")
+        self.ed_network_iface = QLineEdit("blocknet")
+        self.cb_network_set_ipv4 = QCheckBox("Set IPv4 on interface (--api-network-set-ipv4 on)")
+        self.cb_network_set_ipv4.setChecked(False)
+        self.ed_network_ipv4 = QLineEdit("")
+        self.ed_network_ipv4.setPlaceholderText("e.g. 169.254.153.101/16")
+
+        # extra args passed only when p2pool api enabled
         self.ed_p2pool_extra = QLineEdit("")
         self.ed_p2pool_extra.setPlaceholderText("extra p2pool args (optional), passed to BlockNet when --api-p2pool on")
 
@@ -531,7 +562,14 @@ class MainWindow(QMainWindow):
         fl.addRow(self.cb_api_p2pool)
         fl.addRow("P2Pool extra", self.ed_p2pool_extra)
 
+        fl.addRow(self.cb_api_network)
+        fl.addRow("Wintun DLL", _hbox(self.ed_network_wintun_dll, self.btn_network_wintun_dll))
+        fl.addRow("Interface name", self.ed_network_iface)
+        fl.addRow(self.cb_network_set_ipv4)
+        fl.addRow("Interface IPv4 CIDR", self.ed_network_ipv4)
+
         self.btn_randomx_dll.clicked.connect(lambda: self._browse_file_into(self.ed_randomx_dll))
+        self.btn_network_wintun_dll.clicked.connect(lambda: self._browse_file_into(self.ed_network_wintun_dll))
 
         lay.addWidget(gb)
 
@@ -615,9 +653,31 @@ class MainWindow(QMainWindow):
         gateway_l.addWidget(self.txt_gateway)
         self.right_tabs.addTab(gateway_tab, "Gateway")
 
+        # Network (NEW log sink)
+        net_tab = QWidget()
+        net_l = QVBoxLayout(net_tab)
+
+        top = QHBoxLayout()
+        self.cb_net_pause = QCheckBox("Pause")
+        self.cb_net_pause.setChecked(False)
+        self.btn_net_clear = QPushButton("Clear")
+        self.btn_net_clear.clicked.connect(lambda: self.txt_net.setPlainText(""))
+        top.addWidget(QLabel("Network logs: [api-network] / [iface] / [if:*][rx/tx]"))
+        top.addStretch(1)
+        top.addWidget(self.cb_net_pause)
+        top.addWidget(self.btn_net_clear)
+        net_l.addLayout(top)
+
+        self.txt_net = QPlainTextEdit()
+        self.txt_net.setReadOnly(True)
+        self.txt_net.setFont(self.mono)
+        net_l.addWidget(self.txt_net, 1)
+        self.right_tabs.addTab(net_tab, "Network")
+
         # bind clear buttons now that editors exist
         self.btn_clear_out.clicked.connect(lambda: self.txt_out.setPlainText(""))
         self.btn_clear_log.clicked.connect(lambda: self.txt_log.setPlainText(""))
+        self.btn_clear_net.clicked.connect(lambda: self.txt_net.setPlainText(""))
 
     def _build_right_api_tabs(self) -> None:
         self.right_tabs.addTab(self._tab_texttovec(), "API: TextToVec")
@@ -626,6 +686,7 @@ class MainWindow(QMainWindow):
         self.right_tabs.addTab(self._tab_media(), "API: Media")
         self.right_tabs.addTab(self._tab_randomx(), "API: RandomX")
         self.right_tabs.addTab(self._tab_p2pool(), "API: P2Pool")
+        self.right_tabs.addTab(self._tab_network(), "API: Network")  # NEW
 
     def _mk_api_out(self) -> QPlainTextEdit:
         w = QPlainTextEdit()
@@ -979,7 +1040,6 @@ class MainWindow(QMainWindow):
         tab = QWidget()
         lay = QVBoxLayout(tab)
 
-        # NEW: open params patch (UI + optional body)
         gb0 = QGroupBox("Open session params (optional)")
         fl0 = QFormLayout(gb0)
 
@@ -1046,6 +1106,71 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.p2_out, 1)
         return tab
 
+    def _tab_network(self) -> QWidget:
+        tab = QWidget()
+        lay = QVBoxLayout(tab)
+
+        gb1 = QGroupBox("GET /v1/network/status")
+        l1 = QVBoxLayout(gb1)
+        self.btn_net_stat = QPushButton("Fetch network status")
+        self.btn_net_stat.clicked.connect(self._do_network_status)
+        l1.addWidget(self.btn_net_stat)
+
+        gb2 = QGroupBox("POST /v1/network/poll")
+        fl2 = QFormLayout(gb2)
+
+        self.net_poll_max = QSpinBox()
+        self.net_poll_max.setRange(1, 2048)
+        self.net_poll_max.setValue(64)
+
+        self.net_poll_wait = QSpinBox()
+        self.net_poll_wait.setRange(0, 60000)
+        self.net_poll_wait.setSingleStep(50)
+        self.net_poll_wait.setValue(0)
+
+        self.net_poll_enc = QComboBox()
+        self.net_poll_enc.addItems(["b64", "hex"])
+        self.net_poll_enc.setCurrentText("b64")
+
+        self.btn_net_poll = QPushButton("Poll packets")
+        self.btn_net_poll.clicked.connect(self._do_network_poll)
+
+        fl2.addRow("max", self.net_poll_max)
+        fl2.addRow("wait_ms", self.net_poll_wait)
+        fl2.addRow("encoding", self.net_poll_enc)
+        fl2.addRow(self.btn_net_poll)
+
+        gb3 = QGroupBox("POST /v1/network/inject")
+        fl3 = QFormLayout(gb3)
+
+        self.net_inj_mode = QComboBox()
+        self.net_inj_mode.addItems(["packet_b64", "packet_hex"])
+        self.net_inj_mode.setCurrentText("packet_b64")
+
+        self.net_inj_pkt = QPlainTextEdit()
+        self.net_inj_pkt.setFont(self.mono)
+        self.net_inj_pkt.setPlaceholderText("Paste raw IP packet (TUN) as base64 or hex")
+
+        self.net_inj_repeat = QSpinBox()
+        self.net_inj_repeat.setRange(1, 1000)
+        self.net_inj_repeat.setValue(1)
+
+        self.btn_net_inject = QPushButton("Inject packet")
+        self.btn_net_inject.clicked.connect(self._do_network_inject)
+
+        fl3.addRow("mode", self.net_inj_mode)
+        fl3.addRow("packet", self.net_inj_pkt)
+        fl3.addRow("repeat", self.net_inj_repeat)
+        fl3.addRow(self.btn_net_inject)
+
+        lay.addWidget(gb1)
+        lay.addWidget(gb2)
+        lay.addWidget(gb3)
+
+        self.net_out = self._mk_api_out()
+        lay.addWidget(self.net_out, 1)
+        return tab
+
     # ---------------- helpers ----------------
 
     def _schedule_save(self) -> None:
@@ -1098,7 +1223,7 @@ class MainWindow(QMainWindow):
     def _wire_autosave(self) -> None:
         edits = [
             self.ed_host, self.ed_port, self.ed_relay, self.ed_token, self.ed_spool,
-            self.ed_threads_flag,  # NEW
+            self.ed_threads_flag,
             self.ed_server_extra,
 
             self.ed_proxy_listen, self.ed_proxy_backend, self.ed_proxy_cert, self.ed_proxy_key,
@@ -1110,7 +1235,10 @@ class MainWindow(QMainWindow):
             self.ed_key, self.ed_mime, self.ed_put, self.ed_get,
 
             self.ed_api_prefix, self.ed_randomx_dll, self.ed_web_ua,
-            self.ed_p2pool_extra,  # NEW
+            self.ed_p2pool_extra,
+
+            # NEW: network api config
+            self.ed_network_wintun_dll, self.ed_network_iface, self.ed_network_ipv4,
         ]
         for e in edits:
             e.textChanged.connect(self._schedule_save)
@@ -1118,11 +1246,12 @@ class MainWindow(QMainWindow):
         self.ed_host.textChanged.connect(self._sync_relay_from_host_port)
         self.ed_port.textChanged.connect(self._sync_relay_from_host_port)
 
-        self.sp_threads.valueChanged.connect(self._schedule_save)  # NEW
+        self.sp_threads.valueChanged.connect(self._schedule_save)
 
         for cb in (
             self.cb_proxy, self.cb_gateway,
             self.cb_api, self.cb_api_media, self.cb_api_randomx, self.cb_api_web, self.cb_api_p2pool,
+            self.cb_api_network, self.cb_network_set_ipv4,
             self.cb_web_block_private, self.cb_web_allow_http, self.cb_web_allow_https
         ):
             cb.stateChanged.connect(self._schedule_save)
@@ -1133,7 +1262,7 @@ class MainWindow(QMainWindow):
         for sp in (self.sp_web_timeout, self.sp_web_max_page_kb, self.sp_web_max_scripts):
             sp.valueChanged.connect(self._schedule_save)
 
-        # NEW: persist p2pool open defaults
+        # persist p2pool open defaults
         self.p2_open_host.textChanged.connect(self._schedule_save)
         self.p2_open_wallet.textChanged.connect(self._schedule_save)
         self.p2_open_rig.textChanged.connect(self._schedule_save)
@@ -1242,40 +1371,131 @@ class MainWindow(QMainWindow):
         args.extend(toks)
         args.append(str(threads))
 
+    # -------- raw HTTP fallback (used for Network API reliably) --------
+
+    def _http_json(self, method: str, path: str, body: Optional[Dict[str, Any]] = None, *, prefix: Optional[str] = None) -> Any:
+        pfx = (prefix or self._api_prefix() or "/v1").strip()
+        if not pfx.startswith("/"):
+            pfx = "/" + pfx
+        pfx = pfx.rstrip("/")
+
+        if not path.startswith("/"):
+            path = "/" + path
+
+        full_path = pfx + path
+
+        relay = self.ed_relay.text().strip()
+        host, port = _parse_relay_host_port(relay)
+
+        token = self.ed_token.text().strip()
+        headers = {
+            "Accept": "application/json",
+        }
+        if token:
+            # send multiple common auth headers to match whichever the server uses
+            headers["Authorization"] = f"Bearer {token}"
+            headers["X-Blocknet-Key"] = token
+            headers["X-Blocknet-Token"] = token
+
+        data: Optional[bytes] = None
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+            data = json.dumps(body).encode("utf-8")
+
+        conn = http.client.HTTPConnection(host, port, timeout=10)
+        try:
+            conn.request(method.upper(), full_path, body=data, headers=headers)
+            resp = conn.getresponse()
+            raw = resp.read() or b""
+            txt = raw.decode("utf-8", errors="replace")
+
+            try:
+                out = json.loads(txt) if txt.strip() else {}
+            except Exception:
+                out = {"ok": False, "raw": txt}
+
+            if isinstance(out, dict):
+                out.setdefault("status", int(resp.status))
+                out.setdefault("headers", {k: v for (k, v) in resp.getheaders()})
+            return out
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     # -------- stdout/stderr routing --------
 
-    def _classify_line(self, line: str) -> Tuple[bool, bool, Optional[str], str]:
+    def _classify_line(self, line: str) -> Tuple[bool, bool, bool, Optional[str], str]:
         raw = line
         low = raw.strip().lower()
         lstripped = raw.lstrip()
         low_ls = lstripped.lower()
 
+        # Proxy explicit prefix
         if low_ls.startswith("[proxy]") or low_ls.startswith("proxy:") or low_ls.startswith("tlsproxy") or low_ls.startswith("tls proxy"):
             cleaned = lstripped
             for pfx in ("[proxy]", "proxy:", "tlsproxy", "tls proxy"):
                 if cleaned.lower().startswith(pfx):
                     cleaned = cleaned[len(pfx):].lstrip()
                     break
-            return True, False, "proxy", cleaned
+            return True, False, False, "proxy", cleaned
 
+        # Gateway explicit prefix
         if low_ls.startswith("[gateway]") or low_ls.startswith("gateway:") or low_ls.startswith("edge gateway") or low_ls.startswith("edge-gateway"):
             cleaned = lstripped
             for pfx in ("[gateway]", "gateway:", "edge gateway", "edge-gateway"):
                 if cleaned.lower().startswith(pfx):
                     cleaned = cleaned[len(pfx):].lstrip()
                     break
-            return False, True, "gateway", cleaned
+            return False, True, False, "gateway", cleaned
 
+        # Network explicit prefix (NEW)
+        if low_ls.startswith("[blocknet][api-network]") or low_ls.startswith("[api-network]") or low_ls.startswith("api-network:"):
+            cleaned = lstripped
+            for pfx in ("[blocknet][api-network]", "[api-network]", "api-network:"):
+                if cleaned.lower().startswith(pfx):
+                    cleaned = cleaned[len(pfx):].lstrip()
+                    break
+            return False, False, True, "network", cleaned
+
+        if low_ls.startswith("[blocknet][iface]") or low_ls.startswith("[iface]"):
+            cleaned = lstripped
+            for pfx in ("[blocknet][iface]", "[iface]"):
+                if cleaned.lower().startswith(pfx):
+                    cleaned = cleaned[len(pfx):].lstrip()
+                    break
+            return False, False, True, "network", cleaned
+
+        if low_ls.startswith("[blocknet][if:") or low_ls.startswith("[if:"):
+            cleaned = lstripped
+            for pfx in ("[blocknet]",):
+                if cleaned.lower().startswith(pfx):
+                    cleaned = cleaned[len(pfx):].lstrip()
+                    break
+            return False, False, True, "network", cleaned
+
+        # Heuristic contains
         is_proxy = ("[proxy]" in low) or ("tls proxy" in low) or ("tlsproxy" in low) or ("proxy:" in low)
         is_gateway = ("[gateway]" in low) or ("edge gateway" in low) or ("edge-gateway" in low) or ("gateway:" in low)
 
-        ctx: Optional[str] = None
-        if is_proxy and not is_gateway:
-            ctx = "proxy"
-        elif is_gateway and not is_proxy:
-            ctx = "gateway"
+        is_network = (
+            ("[api-network" in low) or
+            ("[blocknet][iface" in low) or
+            ("[blocknet][if:" in low) or
+            ("[if:" in low and "[blocknet]" in low) or
+            ("wintun" in low and "[blocknet]" in low)
+        )
 
-        return is_proxy, is_gateway, ctx, raw.strip("\r\n")
+        ctx: Optional[str] = None
+        if is_proxy and not is_gateway and not is_network:
+            ctx = "proxy"
+        elif is_gateway and not is_proxy and not is_network:
+            ctx = "gateway"
+        elif is_network and not (is_proxy or is_gateway):
+            ctx = "network"
+
+        return is_proxy, is_gateway, is_network, ctx, raw.strip("\r\n")
 
     def _route_process_text(self, text: str, *, is_stderr: bool) -> None:
         if not text:
@@ -1293,23 +1513,34 @@ class MainWindow(QMainWindow):
             if not raw_line.strip():
                 continue
 
-            is_proxy, is_gateway, ctx, cleaned = self._classify_line(raw_line)
+            is_proxy, is_gateway, is_network, ctx, cleaned = self._classify_line(raw_line)
 
-            if (raw_line.startswith(" ") or raw_line.startswith("\t")) and not (is_proxy or is_gateway) and self._last_ctx:
+            # carry context for indented lines
+            if (raw_line.startswith(" ") or raw_line.startswith("\t")) and not (is_proxy or is_gateway or is_network) and self._last_ctx:
                 ctx = self._last_ctx
                 is_proxy = (ctx == "proxy")
                 is_gateway = (ctx == "gateway")
+                is_network = (ctx == "network")
 
             if ctx:
                 self._last_ctx = ctx
 
-            if is_proxy and not is_gateway:
+            # route to dedicated panes
+            if is_proxy and not is_gateway and not is_network:
                 self._append_plain(self.txt_proxy, cleaned, prefix="[stderr] " if is_stderr else "")
-            elif is_gateway and not is_proxy:
+            elif is_gateway and not is_proxy and not is_network:
                 self._append_plain(self.txt_gateway, cleaned, prefix="[stderr] " if is_stderr else "")
-            elif is_proxy and is_gateway:
-                self._append_plain(self.txt_proxy, cleaned, prefix="[stderr] " if is_stderr else "")
-                self._append_plain(self.txt_gateway, cleaned, prefix="[stderr] " if is_stderr else "")
+            elif is_network and not (is_proxy or is_gateway):
+                if not self.cb_net_pause.isChecked():
+                    self._append_plain(self.txt_net, cleaned, prefix="[stderr] " if is_stderr else "")
+            else:
+                # multiple tags: duplicate where relevant
+                if is_proxy:
+                    self._append_plain(self.txt_proxy, cleaned, prefix="[stderr] " if is_stderr else "")
+                if is_gateway:
+                    self._append_plain(self.txt_gateway, cleaned, prefix="[stderr] " if is_stderr else "")
+                if is_network and not self.cb_net_pause.isChecked():
+                    self._append_plain(self.txt_net, cleaned, prefix="[stderr] " if is_stderr else "")
 
     def _read_stdout(self) -> None:
         data = bytes(self.proc.readAllStandardOutput()).decode("utf-8", errors="replace")
@@ -1322,14 +1553,14 @@ class MainWindow(QMainWindow):
             self._route_process_text(data, is_stderr=True)
 
     def _on_proc_error(self, err) -> None:
-        for w in (self.txt_log, self.txt_out, self.txt_proxy, self.txt_gateway):
+        for w in (self.txt_log, self.txt_out, self.txt_proxy, self.txt_gateway, self.txt_net):
             self._append_plain(w, f"[gui] process error: {err}")
         self._set_running(False)
         self.timer.stop()
 
     def _on_finished(self) -> None:
         self.timer.stop()
-        for w in (self.txt_log, self.txt_out, self.txt_proxy, self.txt_gateway):
+        for w in (self.txt_log, self.txt_out, self.txt_proxy, self.txt_gateway, self.txt_net):
             self._append_plain(w, "[gui] server process exited")
         self._set_running(False)
 
@@ -1361,7 +1592,7 @@ class MainWindow(QMainWindow):
 
         args = ["serve", "--listen", relay, "--spool", spool]
 
-        # NEW: threads
+        # threads
         th = int(self.sp_threads.value())
         if th > 0:
             self._append_threads_args(args, th, self.ed_threads_flag.text())
@@ -1382,7 +1613,6 @@ class MainWindow(QMainWindow):
                     args += ["--api-randomx-dll", dll]
             if self.cb_api_web.isChecked():
                 args += ["--api-web", "on"]
-                # optional web knobs if your server supports them
                 args += ["--api-web-block-private", "on" if self.cb_web_block_private.isChecked() else "off"]
                 args += ["--api-web-allow-http", "on" if self.cb_web_allow_http.isChecked() else "off"]
                 args += ["--api-web-allow-https", "on" if self.cb_web_allow_https.isChecked() else "off"]
@@ -1395,6 +1625,20 @@ class MainWindow(QMainWindow):
             if self.cb_api_p2pool.isChecked():
                 args += ["--api-p2pool", "on"]
                 args += self._split_extra_args(self.ed_p2pool_extra.text())
+
+            # NEW: network api config
+            if self.cb_api_network.isChecked():
+                args += ["--api-network", "on"]
+                ndll = self.ed_network_wintun_dll.text().strip()
+                if ndll:
+                    args += ["--api-network-wintun-dll", ndll]
+                nname = self.ed_network_iface.text().strip()
+                if nname:
+                    args += ["--api-network-iface", nname]
+                args += ["--api-network-set-ipv4", "on" if self.cb_network_set_ipv4.isChecked() else "off"]
+                nip = self.ed_network_ipv4.text().strip()
+                if nip:
+                    args += ["--api-network-ipv4", nip]
 
         # Proxy/Gateway
         proxy_on = bool(self.cb_proxy.isChecked())
@@ -1471,7 +1715,7 @@ class MainWindow(QMainWindow):
         self._last_ctx = None
 
         cmdline = f"{BIN_EXE} " + " ".join(args)
-        for w in (self.txt_log, self.txt_out, self.txt_proxy, self.txt_gateway):
+        for w in (self.txt_log, self.txt_out, self.txt_proxy, self.txt_gateway, self.txt_net):
             self._append_plain(w, f"[gui] starting: {cmdline}")
 
         self.proc.setProgram(str(BIN_EXE))
@@ -1493,12 +1737,12 @@ class MainWindow(QMainWindow):
         if self.proc.state() == QProcess.NotRunning:
             return
 
-        for w in (self.txt_log, self.txt_out, self.txt_proxy, self.txt_gateway):
+        for w in (self.txt_log, self.txt_out, self.txt_proxy, self.txt_gateway, self.txt_net):
             self._append_plain(w, "[gui] stopping server...")
 
         self.proc.terminate()
         if not self.proc.waitForFinished(2000):
-            for w in (self.txt_log, self.txt_out, self.txt_proxy, self.txt_gateway):
+            for w in (self.txt_log, self.txt_out, self.txt_proxy, self.txt_gateway, self.txt_net):
                 self._append_plain(w, "[gui] force kill")
             self.proc.kill()
 
@@ -1663,7 +1907,6 @@ class MainWindow(QMainWindow):
                 "max_links": int(self.weblinks_max.value()),
             }
 
-            # These flags are what your C++ route should read.
             if filt == "same-origin":
                 body["same_origin"] = True
             elif filt == "external-only":
@@ -1768,7 +2011,6 @@ class MainWindow(QMainWindow):
 
             parsed = json.loads(raw)
 
-            # allow either: JSON array => items, or JSON object => full body
             if isinstance(parsed, list):
                 body: Dict[str, Any] = {"seed_hex": seed_hex, "items": parsed}
             elif isinstance(parsed, dict):
@@ -1791,10 +2033,52 @@ class MainWindow(QMainWindow):
         self.web_include_js.setChecked(False)
         self._do_web_fetch()
 
+    # Network API (NEW) — use raw HTTP so it works even if BlockNetClient hasn't been updated yet
+    def _do_network_status(self) -> None:
+        try:
+            j = self._http_json("GET", "/network/status", None, prefix=self._api_prefix())
+            self.net_out.setPlainText("")
+            self._append_json(self.net_out, j)
+            self._append_json(self.txt_out, j)
+        except Exception as e:
+            try:
+                self.net_out.setPlainText("")
+                self._append_plain(self.net_out, f"network status error: {e}")
+            except Exception:
+                pass
+
+    def _do_network_poll(self) -> None:
+        try:
+            body = {
+                "max": int(self.net_poll_max.value()),
+                "wait_ms": int(self.net_poll_wait.value()),
+                "encoding": self.net_poll_enc.currentText().strip(),
+            }
+            j = self._http_json("POST", "/network/poll", body, prefix=self._api_prefix())
+            self.net_out.setPlainText("")
+            self._append_json(self.net_out, j)
+        except Exception as e:
+            self._append_plain(self.net_out, f"network poll error: {e}")
+
+    def _do_network_inject(self) -> None:
+        try:
+            mode = self.net_inj_mode.currentText().strip()
+            pkt = (self.net_inj_pkt.toPlainText() or "").strip()
+            if not pkt:
+                raise ValueError("packet required")
+
+            body: Dict[str, Any] = {"repeat": int(self.net_inj_repeat.value())}
+            body[mode] = pkt
+
+            j = self._http_json("POST", "/network/inject", body, prefix=self._api_prefix())
+            self.net_out.setPlainText("")
+            self._append_json(self.net_out, j)
+        except Exception as e:
+            self._append_plain(self.net_out, f"network inject error: {e}")
+
     # P2Pool
     def _do_p2pool_open(self) -> None:
         try:
-            # Build optional open params body (patch)
             body: Dict[str, Any] = {}
 
             host = self.p2_open_host.text().strip()
@@ -1818,7 +2102,6 @@ class MainWindow(QMainWindow):
                 body.update(extra)
 
             cli = self._client()
-            # Try calling with a body if your BlockNetClient supports it; otherwise fall back.
             try:
                 j = cli.api_p2pool_open(body, prefix=self._api_prefix()) if body else cli.api_p2pool_open(prefix=self._api_prefix())
             except TypeError:
@@ -1861,7 +2144,6 @@ class MainWindow(QMainWindow):
             if not isinstance(body, dict):
                 raise ValueError("submit payload must be a JSON object")
 
-            # auto-fill session if empty
             if not body.get("session"):
                 sess = self.p2_session.text().strip()
                 if sess:
@@ -1906,7 +2188,6 @@ class MainWindow(QMainWindow):
             self.ed_port.setText(j.get("port", self.ed_port.text()))
             self.ed_server_extra.setText(j.get("server_extra", self.ed_server_extra.text()))
 
-            # NEW: threads
             try:
                 self.sp_threads.setValue(int(j.get("threads", self.sp_threads.value())))
             except Exception:
@@ -1955,7 +2236,14 @@ class MainWindow(QMainWindow):
             self.sp_web_max_scripts.setValue(int(j.get("web_max_scripts", self.sp_web_max_scripts.value())))
             self.ed_web_ua.setText(j.get("web_ua", self.ed_web_ua.text()))
 
-            # NEW: p2pool open defaults
+            # NEW: network api config
+            self.cb_api_network.setChecked(bool(j.get("api_network", True)))
+            self.ed_network_wintun_dll.setText(j.get("network_wintun_dll", self.ed_network_wintun_dll.text()))
+            self.ed_network_iface.setText(j.get("network_iface", self.ed_network_iface.text()))
+            self.cb_network_set_ipv4.setChecked(bool(j.get("network_set_ipv4", False)))
+            self.ed_network_ipv4.setText(j.get("network_ipv4", self.ed_network_ipv4.text()))
+
+            # p2pool open defaults
             self.p2_open_host.setText(j.get("p2_open_host", self.p2_open_host.text()))
             self.p2_open_wallet.setText(j.get("p2_open_wallet", self.p2_open_wallet.text()))
             self.p2_open_rig.setText(j.get("p2_open_rig", self.p2_open_rig.text()))
@@ -1998,7 +2286,6 @@ class MainWindow(QMainWindow):
                 "port": self.ed_port.text().strip(),
                 "server_extra": self.ed_server_extra.text().strip(),
 
-                # NEW: threads
                 "threads": int(self.sp_threads.value()),
                 "threads_flag": self.ed_threads_flag.text().strip(),
 
@@ -2037,7 +2324,13 @@ class MainWindow(QMainWindow):
                 "web_max_scripts": int(self.sp_web_max_scripts.value()),
                 "web_ua": self.ed_web_ua.text().strip(),
 
-                # NEW: p2pool open defaults
+                # NEW: network api config
+                "api_network": bool(self.cb_api_network.isChecked()),
+                "network_wintun_dll": self.ed_network_wintun_dll.text().strip(),
+                "network_iface": self.ed_network_iface.text().strip(),
+                "network_set_ipv4": bool(self.cb_network_set_ipv4.isChecked()),
+                "network_ipv4": self.ed_network_ipv4.text().strip(),
+
                 "p2_open_host": self.p2_open_host.text().strip(),
                 "p2_open_wallet": self.p2_open_wallet.text().strip(),
                 "p2_open_rig": self.p2_open_rig.text().strip(),
