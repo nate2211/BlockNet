@@ -229,6 +229,13 @@ class BlockNetClient:
             p = "/" + p
         return p.rstrip("/")
 
+    @staticmethod
+    def _join_prefix(pfx: str, subpath: str) -> str:
+        sp = (subpath or "").strip()
+        if not sp.startswith("/"):
+            sp = "/" + sp
+        return pfx + sp
+
     # core
     def api_ping(self, *, prefix: str = "/v1") -> Dict[str, Any]:
         p = self._pfx(prefix)
@@ -281,6 +288,7 @@ class BlockNetClient:
         p = self._pfx(prefix)
         return self.request_json("POST", f"{p}/randomx/scan", dict(body))
 
+    # web
     def api_web_fetch(self, body: Dict[str, Any], *, prefix: str = "/v1") -> Dict[str, Any]:
         p = self._pfx(prefix)
         return self.request_json("POST", f"{p}/web/fetch", dict(body))
@@ -297,6 +305,70 @@ class BlockNetClient:
         p = self._pfx(prefix)
         return self.request_json("POST", f"{p}/web/rss_find", dict(body))
 
+    # webworker (serve scripts + config)
+    def api_webworker_config(self, *, prefix: str = "/v1") -> Dict[str, Any]:
+        """
+        GET /webworker/config
+        Returns URLs + default tuning for the browser worker scripts.
+        """
+        p = self._pfx(prefix)
+        return self.request_json("GET", f"{p}/webworker/config", None)
+
+    def api_webworker_miner_js(
+        self,
+        *,
+        prefix: str = "/v1",
+        miner_js_path: str = "/webworker/miner.js",
+    ) -> Tuple[int, Dict[str, str], bytes]:
+        """
+        GET <prefix><miner_js_path>
+        Default: /v1/webworker/miner.js
+        Returns raw JS bytes (status, headers, body).
+        """
+        p = self._pfx(prefix)
+        return self.request_raw("GET", self._join_prefix(p, miner_js_path))
+
+    def api_webworker_miner_js_text(
+        self,
+        *,
+        prefix: str = "/v1",
+        miner_js_path: str = "/webworker/miner.js",
+        encoding: str = "utf-8",
+    ) -> Tuple[int, Dict[str, str], str]:
+        """
+        Convenience wrapper that decodes miner.js to text.
+        """
+        status, hdrs, data = self.api_webworker_miner_js(prefix=prefix, miner_js_path=miner_js_path)
+        return status, hdrs, (data or b"").decode(encoding, errors="replace")
+
+    def api_webworker_client_js(
+        self,
+        *,
+        prefix: str = "/v1",
+        client_js_path: str = "/webworker/client.js",
+    ) -> Tuple[int, Dict[str, str], bytes]:
+        """
+        GET <prefix><client_js_path>
+        Default: /v1/webworker/client.js
+        Returns raw JS bytes (status, headers, body).
+        """
+        p = self._pfx(prefix)
+        return self.request_raw("GET", self._join_prefix(p, client_js_path))
+
+    def api_webworker_client_js_text(
+        self,
+        *,
+        prefix: str = "/v1",
+        client_js_path: str = "/webworker/client.js",
+        encoding: str = "utf-8",
+    ) -> Tuple[int, Dict[str, str], str]:
+        """
+        Convenience wrapper that decodes client.js to text.
+        """
+        status, hdrs, data = self.api_webworker_client_js(prefix=prefix, client_js_path=client_js_path)
+        return status, hdrs, (data or b"").decode(encoding, errors="replace")
+
+    # p2pool
     def api_p2pool_open(self, *, prefix: str = "/v1") -> Dict[str, Any]:
         p = self._pfx(prefix)
         return self.request_json("POST", f"{p}/p2pool/open", {})
@@ -316,6 +388,7 @@ class BlockNetClient:
     def api_p2pool_close(self, session: str, *, prefix: str = "/v1") -> Dict[str, Any]:
         p = self._pfx(prefix)
         return self.request_json("POST", f"{p}/p2pool/close", {"session": session})
+
     def api_p2pool_scan(self, body: Dict[str, Any], *, prefix: str = "/v1") -> Dict[str, Any]:
         p = self._pfx(prefix)
         return self.request_json("POST", f"{p}/p2pool/scan", dict(body))

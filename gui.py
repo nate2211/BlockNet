@@ -8,10 +8,22 @@ import secrets
 import sys
 import http.client
 import urllib.parse
+import webbrowser
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from PyQt5.QtCore import QProcess, QTimer, Qt, QStandardPaths
+
+# Optional (for in-app WebWorker testing)
+try:
+    from PyQt5.QtWebEngineWidgets import QWebEngineView  # type: ignore
+    from PyQt5.QtCore import QUrl  # type: ignore
+    _WEBENGINE_OK = True
+except Exception:
+    QWebEngineView = None  # type: ignore
+    QUrl = None  # type: ignore
+    _WEBENGINE_OK = False
+
 from PyQt5.QtGui import QFont, QPalette, QColor
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -214,6 +226,40 @@ def _parse_relay_host_port(relay: str) -> Tuple[str, int]:
     host = u.hostname or "127.0.0.1"
     port = u.port or 80
     return host, int(port)
+
+
+def _relay_base_url(relay: str) -> str:
+    """
+    Convert relay like:
+      - 127.0.0.1:38888
+      - http://host:port
+      - https://host:port/base/path
+    into a base URL: scheme://host:port[/base]
+    """
+    r = (relay or "").strip()
+    if not r:
+        return "http://127.0.0.1:38888"
+    if "://" not in r:
+        r = "http://" + r
+    u = urllib.parse.urlsplit(r)
+    scheme = (u.scheme or "http").lower()
+    host = u.hostname or "127.0.0.1"
+    if u.port:
+        port = int(u.port)
+    else:
+        port = 443 if scheme == "https" else 80
+    base_path = (u.path or "").rstrip("/")
+    if base_path == "/":
+        base_path = ""
+    return f"{scheme}://{host}:{port}{base_path}"
+
+
+def _join_url(base: str, path: str) -> str:
+    base = (base or "").rstrip("/")
+    path = (path or "")
+    if not path.startswith("/"):
+        path = "/" + path
+    return base + path
 
 
 # ----------------------------- GUI -----------------------------------------------
@@ -538,6 +584,10 @@ class MainWindow(QMainWindow):
         self.cb_api_p2pool = QCheckBox("Enable P2Pool API (--api-p2pool on)")
         self.cb_api_p2pool.setChecked(False)
 
+        # NEW: WebWorker API
+        self.cb_api_webworker = QCheckBox("Enable WebWorker API (--api-webworker on)")
+        self.cb_api_webworker.setChecked(False)
+
         # NEW: Network API
         self.cb_api_network = QCheckBox("Enable Network API (--api-network on)")
         self.cb_api_network.setChecked(True)
@@ -548,7 +598,8 @@ class MainWindow(QMainWindow):
         self.cb_network_set_ipv4.setChecked(False)
         self.ed_network_ipv4 = QLineEdit("")
         self.ed_network_ipv4.setPlaceholderText("e.g. 169.254.153.101/16")
-
+        self.cb_api_process = QCheckBox("Enable Process API (--api-process on)")
+        self.cb_api_process.setChecked(False)
         # extra args passed only when p2pool api enabled
         self.ed_p2pool_extra = QLineEdit("")
         self.ed_p2pool_extra.setPlaceholderText("extra p2pool args (optional), passed to BlockNet when --api-p2pool on")
@@ -561,6 +612,9 @@ class MainWindow(QMainWindow):
         fl.addRow(self.cb_api_web)
         fl.addRow(self.cb_api_p2pool)
         fl.addRow("P2Pool extra", self.ed_p2pool_extra)
+
+        fl.addRow(self.cb_api_webworker)
+        fl.addRow(self.cb_api_process)
 
         fl.addRow(self.cb_api_network)
         fl.addRow("Wintun DLL", _hbox(self.ed_network_wintun_dll, self.btn_network_wintun_dll))
@@ -687,6 +741,7 @@ class MainWindow(QMainWindow):
         self.right_tabs.addTab(self._tab_randomx(), "API: RandomX")
         self.right_tabs.addTab(self._tab_p2pool(), "API: P2Pool")
         self.right_tabs.addTab(self._tab_network(), "API: Network")  # NEW
+        self.right_tabs.addTab(self._tab_webworker(), "API: WebWorker")  # NEW
 
     def _mk_api_out(self) -> QPlainTextEdit:
         w = QPlainTextEdit()
@@ -1171,6 +1226,464 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.net_out, 1)
         return tab
 
+    # ---------------- WebWorker tab ----------------
+
+    def _webworker_harness_html(self) -> str:
+        # This page loads in a QWebEngineView (if available) and allows Python to call:
+        #   bn_start(cfg), bn_stop(), bn_status(), bn_clear()
+        #
+        # It fetches the worker JS, blobs it, spawns N workers, and prints their onmessage.
+        return r"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>BlockNet WebWorker Harness</title>
+<style>
+  body { margin:0; padding:0; background:#111; color:#ddd; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+  .bar { padding:10px 12px; border-bottom:1px solid #2b2b2b; background:#161616; }
+  .bar b { color:#fff; }
+  .hint { color:#aaa; font-size:12px; margin-top:6px; }
+  #log { white-space: pre-wrap; padding:12px; margin:0; }
+  .ok { color:#9fe59f; }
+  .err { color:#ffb1b1; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <b>BlockNet WebWorker Harness</b>
+    <div class="hint">Controlled by the PyQt panel. Logs appear below.</div>
+  </div>
+  <pre id="log"></pre>
+
+<script>
+let miners = [];
+let lastCfg = null;
+
+function el(id){ return document.getElementById(id); }
+function now(){ return new Date().toISOString(); }
+
+function logLine(s, cls){
+  const pre = el("log");
+  const line = `[${now()}] ${s}\n`;
+  if (cls) {
+    // lightweight class tagging via ANSI-ish markers
+    pre.textContent += line;
+  } else {
+    pre.textContent += line;
+  }
+  pre.scrollTop = pre.scrollHeight;
+}
+
+async function fetchText(url, headers){
+  const resp = await fetch(url, { method:"GET", headers: headers || {} });
+  const txt = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`fetch failed ${resp.status}: ${txt.slice(0, 200)}`);
+  }
+  return txt;
+}
+
+async function createWorkerFromUrl(url, headers){
+  const js = await fetchText(url, headers);
+  const blob = new Blob([js], { type: "application/javascript" });
+  const blobUrl = URL.createObjectURL(blob);
+  const w = new Worker(blobUrl, { type: "classic" });
+  // release blob url later (after worker starts)
+  setTimeout(()=>{ try { URL.revokeObjectURL(blobUrl); } catch(e){} }, 5000);
+  return w;
+}
+
+function stopAll(){
+  for (const w of miners) {
+    try { w.postMessage({ op:"stop" }); } catch(e){}
+    try { w.terminate(); } catch(e){}
+  }
+  miners = [];
+}
+
+async function bn_start(cfg){
+  try {
+    stopAll();
+    lastCfg = cfg || {};
+    const count = (lastCfg.count|0) > 0 ? (lastCfg.count|0) : 1;
+    const workerUrl = String(lastCfg.worker_url || "");
+    if (!workerUrl) throw new Error("worker_url missing");
+
+    const scriptHeaders = lastCfg.script_headers || {};
+    logLine(`START: count=${count} worker_url=${workerUrl}`);
+
+    for (let i = 0; i < count; i++) {
+      const w = await createWorkerFromUrl(workerUrl, scriptHeaders);
+      w.onmessage = (ev) => {
+        const m = ev.data || {};
+        const op = m.op || "msg";
+        logLine(`worker#${i} ${op}: ` + JSON.stringify(m));
+      };
+      w.onerror = (ev) => {
+        logLine(`worker#${i} ERROR: ${String(ev && ev.message ? ev.message : ev)}`, "err");
+      };
+      // start message payload for the miner worker script
+      w.postMessage({ op:"start", cfg: lastCfg.cfg || {} });
+      miners.push(w);
+    }
+
+    logLine("STARTED.", "ok");
+    return { ok:true, count: miners.length };
+  } catch (e) {
+    logLine("START ERROR: " + String(e && e.message ? e.message : e), "err");
+    return { ok:false, error: String(e && e.message ? e.message : e) };
+  }
+}
+
+function bn_stop(){
+  stopAll();
+  logLine("STOPPED.", "ok");
+  return { ok:true };
+}
+
+function bn_clear(){
+  el("log").textContent = "";
+  return { ok:true };
+}
+
+function bn_status(){
+  const st = { ok:true, workers: miners.length, has_cfg: !!lastCfg, worker_url: (lastCfg && lastCfg.worker_url) ? String(lastCfg.worker_url) : "" };
+  logLine("STATUS: " + JSON.stringify(st));
+  // ask each worker for status (async, responses come via onmessage)
+  for (const w of miners) {
+    try { w.postMessage({ op:"status" }); } catch(e){}
+  }
+  return st;
+}
+</script>
+</body>
+</html>
+"""
+
+    def _tab_webworker(self) -> QWidget:
+        tab = QWidget()
+        lay = QVBoxLayout(tab)
+
+        gb = QGroupBox("WebWorker Miner (browser harness)")
+        fl = QFormLayout(gb)
+
+        self.webw_enabled_hint = QLabel("Tip: enable --api-webworker on in API Config, then Start server.")
+        self.webw_enabled_hint.setWordWrap(True)
+
+        self.webw_base = QLineEdit("")
+        self.webw_base.setPlaceholderText("auto from Relay (recommended to leave blank)")
+
+        self.webw_worker_url = QLineEdit("")
+        self.webw_worker_url.setPlaceholderText("auto: <base><api_prefix>/webworker/miner.js")
+
+        self.webw_count = QSpinBox()
+        self.webw_count.setRange(1, 64)
+        self.webw_count.setValue(1)
+
+        self.webw_send_auth = QCheckBox("Send auth headers (Authorization + X-Blocknet-Key)")
+        self.webw_send_auth.setChecked(True)
+
+        self.webw_scan_iters = QSpinBox()
+        self.webw_scan_iters.setRange(1, 50_000_000)
+        self.webw_scan_iters.setSingleStep(50_000)
+        self.webw_scan_iters.setValue(200_000)
+
+        self.webw_scan_max_results = QSpinBox()
+        self.webw_scan_max_results.setRange(1, 512)
+        self.webw_scan_max_results.setValue(4)
+
+        self.webw_scan_threads = QSpinBox()
+        self.webw_scan_threads.setRange(0, 4096)
+        self.webw_scan_threads.setValue(0)
+
+        self.webw_poll_max_msgs = QSpinBox()
+        self.webw_poll_max_msgs.setRange(1, 512)
+        self.webw_poll_max_msgs.setValue(32)
+
+        self.webw_sleep_ms = QSpinBox()
+        self.webw_sleep_ms.setRange(0, 5000)
+        self.webw_sleep_ms.setSingleStep(5)
+        self.webw_sleep_ms.setValue(0)
+
+        self.webw_poll_first = QCheckBox("poll_first (scan will poll job first)")
+        self.webw_poll_first.setChecked(True)
+
+        # Buttons
+        btns = QHBoxLayout()
+        self.btn_webw_config = QPushButton("Fetch /webworker/config")
+        self.btn_webw_start = QPushButton("Start workers")
+        self.btn_webw_stop = QPushButton("Stop")
+        self.btn_webw_status = QPushButton("Status")
+        self.btn_webw_clear = QPushButton("Clear log")
+        self.btn_webw_open_external = QPushButton("Open external test page")
+
+        btns.addWidget(self.btn_webw_config)
+        btns.addWidget(self.btn_webw_start)
+        btns.addWidget(self.btn_webw_stop)
+        btns.addWidget(self.btn_webw_status)
+        btns.addWidget(self.btn_webw_clear)
+        btns.addWidget(self.btn_webw_open_external)
+
+        fl.addRow(self.webw_enabled_hint)
+        fl.addRow("baseUrl", self.webw_base)
+        fl.addRow("worker_url", self.webw_worker_url)
+        fl.addRow("workers", self.webw_count)
+        fl.addRow(self.webw_send_auth)
+        fl.addRow("scan_iters", self.webw_scan_iters)
+        fl.addRow("scan_max_results", self.webw_scan_max_results)
+        fl.addRow("scan_threads (0=auto)", self.webw_scan_threads)
+        fl.addRow("poll_max_msgs", self.webw_poll_max_msgs)
+        fl.addRow("sleep_ms", self.webw_sleep_ms)
+        fl.addRow(self.webw_poll_first)
+        fl.addRow(btns)
+
+        lay.addWidget(gb)
+
+        # Config output
+        gb_out = QGroupBox("WebWorker API output")
+        out_l = QVBoxLayout(gb_out)
+        self.webw_out = self._mk_api_out()
+        out_l.addWidget(self.webw_out)
+        lay.addWidget(gb_out)
+
+        # Live harness view or fallback
+        if _WEBENGINE_OK and QWebEngineView is not None:
+            self.webw_view = QWebEngineView()
+            try:
+                # About:blank base is OK; fetch uses absolute worker URL anyway
+                self.webw_view.setHtml(self._webworker_harness_html(), QUrl("about:blank"))  # type: ignore
+            except Exception:
+                self.webw_view.setHtml(self._webworker_harness_html())
+            lay.addWidget(self.webw_view, 1)
+        else:
+            self.webw_view = None
+            gb_fb = QGroupBox("In-app harness unavailable (PyQtWebEngine not installed)")
+            fb_l = QVBoxLayout(gb_fb)
+            msg = QPlainTextEdit()
+            msg.setReadOnly(True)
+            msg.setFont(self.mono)
+            msg.setPlainText(
+                "PyQtWebEngine is not available, so the harness can't run inside the app.\n\n"
+                "You can still click 'Open external test page' to run the worker in your default browser.\n"
+                "If you want it embedded, install PyQtWebEngine and restart:\n"
+                "  pip install PyQtWebEngine\n"
+            )
+            fb_l.addWidget(msg)
+            lay.addWidget(gb_fb, 1)
+
+        # Wire buttons
+        self.btn_webw_config.clicked.connect(self._do_webworker_config)
+        self.btn_webw_start.clicked.connect(self._do_webworker_start)
+        self.btn_webw_stop.clicked.connect(self._do_webworker_stop)
+        self.btn_webw_status.clicked.connect(self._do_webworker_status)
+        self.btn_webw_clear.clicked.connect(self._do_webworker_clear)
+        self.btn_webw_open_external.clicked.connect(self._do_webworker_open_external)
+
+        return tab
+
+    def _webworker_effective_base(self) -> str:
+        b = self.webw_base.text().strip()
+        if b:
+            return b.rstrip("/")
+        return _relay_base_url(self.ed_relay.text().strip()).rstrip("/")
+
+    def _webworker_effective_worker_url(self) -> str:
+        u = self.webw_worker_url.text().strip()
+        if u:
+            return u
+        base = self._webworker_effective_base()
+        pfx = self._api_prefix().strip()
+        if not pfx.startswith("/"):
+            pfx = "/" + pfx
+        pfx = pfx.rstrip("/")
+        return _join_url(base, pfx + "/webworker/miner.js")
+
+    def _webworker_cfg_obj(self) -> Dict[str, Any]:
+        base = self._webworker_effective_base()
+        api_prefix = self._api_prefix().strip() or "/v1"
+        if not api_prefix.startswith("/"):
+            api_prefix = "/" + api_prefix
+        api_prefix = api_prefix.rstrip("/")
+
+        headers: Dict[str, str] = {}
+        token = self.ed_token.text().strip()
+        if token and self.webw_send_auth.isChecked():
+            headers["Authorization"] = f"Bearer {token}"
+            headers["X-Blocknet-Key"] = token
+
+        cfg = {
+            "baseUrl": base,
+            "apiPrefix": api_prefix,
+            "headers": headers,
+            "poll": {"max_msgs": int(self.webw_poll_max_msgs.value())},
+            "scan": {
+                "iters": int(self.webw_scan_iters.value()),
+                "max_results": int(self.webw_scan_max_results.value()),
+                "threads": int(self.webw_scan_threads.value()),
+                "poll_first": bool(self.webw_poll_first.isChecked()),
+            },
+            "sleep_ms": int(self.webw_sleep_ms.value()),
+        }
+        return cfg
+
+    def _do_webworker_config(self) -> None:
+        try:
+            j = self._client().api_webworker_config(prefix=self._api_prefix())
+            self.webw_out.setPlainText("")
+            self._append_json(self.webw_out, j)
+
+            # If server returns defaults, pull them in (best-effort)
+            if isinstance(j, dict) and j.get("ok") and isinstance(j.get("defaults"), dict):
+                d = j["defaults"]
+                try:
+                    self.webw_scan_iters.setValue(int(d.get("scan_iters", self.webw_scan_iters.value())))
+                except Exception:
+                    pass
+                try:
+                    self.webw_scan_max_results.setValue(int(d.get("scan_max_results", self.webw_scan_max_results.value())))
+                except Exception:
+                    pass
+                try:
+                    self.webw_scan_threads.setValue(int(d.get("scan_threads", self.webw_scan_threads.value())))
+                except Exception:
+                    pass
+                try:
+                    self.webw_poll_max_msgs.setValue(int(d.get("poll_max_msgs", self.webw_poll_max_msgs.value())))
+                except Exception:
+                    pass
+                try:
+                    self.webw_sleep_ms.setValue(int(d.get("sleep_ms", self.webw_sleep_ms.value())))
+                except Exception:
+                    pass
+                try:
+                    if "poll_first" in d:
+                        self.webw_poll_first.setChecked(bool(d.get("poll_first")))
+                except Exception:
+                    pass
+
+            # If server returns miner_js url, use it
+            try:
+                miner_js = str(j.get("miner_js") or "").strip()
+                if miner_js:
+                    base = self._webworker_effective_base()
+                    # If miner_js is already absolute, keep it; else join base+miner_js
+                    if miner_js.startswith("http://") or miner_js.startswith("https://"):
+                        self.webw_worker_url.setText(miner_js)
+                    else:
+                        self.webw_worker_url.setText(_join_url(base, miner_js))
+            except Exception:
+                pass
+
+        except Exception as e:
+            self.webw_out.setPlainText("")
+            self._append_plain(self.webw_out, f"webworker/config error: {e}")
+
+    def _do_webworker_start(self) -> None:
+        try:
+            worker_url = self._webworker_effective_worker_url()
+            cfg = self._webworker_cfg_obj()
+            count = int(self.webw_count.value())
+
+            # Headers used to FETCH the worker script (CORS / auth)
+            script_headers: Dict[str, str] = {}
+            token = self.ed_token.text().strip()
+            if token and self.webw_send_auth.isChecked():
+                script_headers["Authorization"] = f"Bearer {token}"
+                script_headers["X-Blocknet-Key"] = token
+
+            payload = {
+                "count": count,
+                "worker_url": worker_url,
+                "script_headers": script_headers,
+                "cfg": cfg,
+            }
+
+            self.webw_out.setPlainText("")
+            self._append_plain(self.webw_out, f"Starting WebWorkers...\nworker_url={worker_url}\nbaseUrl={cfg.get('baseUrl')}\napiPrefix={cfg.get('apiPrefix')}")
+
+            if self.webw_view is not None:
+                js = "bn_start(" + json.dumps(payload) + ")"
+                self.webw_view.page().runJavaScript(js)  # type: ignore
+            else:
+                # No embedded engine: open external page (and auto-start via query? keep manual)
+                self._do_webworker_open_external()
+
+        except Exception as e:
+            self._append_plain(self.webw_out, f"webworker start error: {e}")
+
+    def _do_webworker_stop(self) -> None:
+        try:
+            if self.webw_view is not None:
+                self.webw_view.page().runJavaScript("bn_stop()")  # type: ignore
+            else:
+                self._append_plain(self.webw_out, "Stop requested (external browser workers must be stopped in browser).")
+        except Exception as e:
+            self._append_plain(self.webw_out, f"webworker stop error: {e}")
+
+    def _do_webworker_status(self) -> None:
+        try:
+            if self.webw_view is not None:
+                self.webw_view.page().runJavaScript("bn_status()")  # type: ignore
+            else:
+                self._append_plain(self.webw_out, "Status requested (external browser workers report status in browser).")
+        except Exception as e:
+            self._append_plain(self.webw_out, f"webworker status error: {e}")
+
+    def _do_webworker_clear(self) -> None:
+        try:
+            if self.webw_view is not None:
+                self.webw_view.page().runJavaScript("bn_clear()")  # type: ignore
+            else:
+                self.webw_out.setPlainText("")
+        except Exception:
+            pass
+
+    def _do_webworker_open_external(self) -> None:
+        """
+        Writes a local HTML harness and opens it in the default browser.
+        (Works even without PyQtWebEngine.)
+        """
+        try:
+            out_dir = app_data_dir()
+            html_path = out_dir / "blocknet_webworker_harness.html"
+
+            # embed a minimal control row in the page itself so it can be used standalone
+            base = self._webworker_effective_base()
+            pfx = self._api_prefix().strip()
+            if not pfx.startswith("/"):
+                pfx = "/" + pfx
+            pfx = pfx.rstrip("/")
+
+            worker_url = self._webworker_effective_worker_url()
+            cfg = self._webworker_cfg_obj()
+            count = int(self.webw_count.value())
+
+            token = self.ed_token.text().strip()
+            script_headers: Dict[str, str] = {}
+            if token and self.webw_send_auth.isChecked():
+                script_headers["Authorization"] = f"Bearer {token}"
+                script_headers["X-Blocknet-Key"] = token
+
+            payload = {
+                "count": count,
+                "worker_url": worker_url,
+                "script_headers": script_headers,
+                "cfg": cfg,
+            }
+
+            html = self._webworker_harness_html()
+            # append autostart block
+            html += "\n<!-- AUTOSTART -->\n<script>\n"
+            html += "setTimeout(()=>{ try { bn_start(" + json.dumps(payload) + "); } catch(e) { console.error(e); } }, 200);\n"
+            html += "</script>\n"
+
+            html_path.write_text(html, encoding="utf-8")
+            webbrowser.open(str(html_path.as_uri()))
+            self._append_plain(self.webw_out, f"Opened external harness: {html_path}")
+        except Exception as e:
+            self._append_plain(self.webw_out, f"open external harness error: {e}")
+
     # ---------------- helpers ----------------
 
     def _schedule_save(self) -> None:
@@ -1239,6 +1752,9 @@ class MainWindow(QMainWindow):
 
             # NEW: network api config
             self.ed_network_wintun_dll, self.ed_network_iface, self.ed_network_ipv4,
+
+            # NEW: webworker harness fields
+            self.webw_base, self.webw_worker_url,
         ]
         for e in edits:
             e.textChanged.connect(self._schedule_save)
@@ -1251,6 +1767,8 @@ class MainWindow(QMainWindow):
         for cb in (
             self.cb_proxy, self.cb_gateway,
             self.cb_api, self.cb_api_media, self.cb_api_randomx, self.cb_api_web, self.cb_api_p2pool,
+            self.cb_api_webworker,  # NEW
+            self.cb_api_process,
             self.cb_api_network, self.cb_network_set_ipv4,
             self.cb_web_block_private, self.cb_web_allow_http, self.cb_web_allow_https
         ):
@@ -1268,6 +1786,16 @@ class MainWindow(QMainWindow):
         self.p2_open_rig.textChanged.connect(self._schedule_save)
         self.p2_open_threads.valueChanged.connect(self._schedule_save)
         self.p2_open_extra_json.textChanged.connect(self._schedule_save)
+
+        # persist webworker harness defaults
+        self.webw_count.valueChanged.connect(self._schedule_save)
+        self.webw_send_auth.stateChanged.connect(self._schedule_save)
+        self.webw_scan_iters.valueChanged.connect(self._schedule_save)
+        self.webw_scan_max_results.valueChanged.connect(self._schedule_save)
+        self.webw_scan_threads.valueChanged.connect(self._schedule_save)
+        self.webw_poll_max_msgs.valueChanged.connect(self._schedule_save)
+        self.webw_sleep_ms.valueChanged.connect(self._schedule_save)
+        self.webw_poll_first.stateChanged.connect(self._schedule_save)
 
     def _browse_file_into(self, edit: QLineEdit, filter_str: str = "All files (*.*)") -> None:
         start_dir = str(Path.home())
@@ -1481,7 +2009,9 @@ class MainWindow(QMainWindow):
 
         is_network = (
             ("[api-network" in low) or
+            ("[blocknet][api-network]" in low) or
             ("[blocknet][iface" in low) or
+            ("[blocknet][iface]" in low) or
             ("[blocknet][if:" in low) or
             ("[if:" in low and "[blocknet]" in low) or
             ("wintun" in low and "[blocknet]" in low)
@@ -1626,6 +2156,10 @@ class MainWindow(QMainWindow):
                 args += ["--api-p2pool", "on"]
                 args += self._split_extra_args(self.ed_p2pool_extra.text())
 
+            # NEW: webworker api
+            if self.cb_api_webworker.isChecked():
+                args += ["--api-webworker", "on"]
+
             # NEW: network api config
             if self.cb_api_network.isChecked():
                 args += ["--api-network", "on"]
@@ -1639,7 +2173,8 @@ class MainWindow(QMainWindow):
                 nip = self.ed_network_ipv4.text().strip()
                 if nip:
                     args += ["--api-network-ipv4", nip]
-
+                if self.cb_api_process.isChecked():
+                    args += ["--api-process", "on"]
         # Proxy/Gateway
         proxy_on = bool(self.cb_proxy.isChecked())
         gateway_on = bool(self.cb_gateway.isChecked())
@@ -2225,6 +2760,8 @@ class MainWindow(QMainWindow):
             self.cb_api_randomx.setChecked(bool(j.get("api_randomx", True)))
             self.cb_api_web.setChecked(bool(j.get("api_web", True)))
             self.cb_api_p2pool.setChecked(bool(j.get("api_p2pool", False)))
+            self.cb_api_webworker.setChecked(bool(j.get("api_webworker", False)))
+            self.cb_api_process.setChecked(bool(j.get("api_process", False)))
             self.ed_randomx_dll.setText(j.get("randomx_dll", self.ed_randomx_dll.text()))
             self.ed_p2pool_extra.setText(j.get("p2pool_extra", self.ed_p2pool_extra.text()))
 
@@ -2252,6 +2789,39 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self.p2_open_extra_json.setPlainText(j.get("p2_open_extra_json", self.p2_open_extra_json.toPlainText()))
+
+            # webworker harness defaults
+            self.webw_base.setText(j.get("webw_base", self.webw_base.text()))
+            self.webw_worker_url.setText(j.get("webw_worker_url", self.webw_worker_url.text()))
+            try:
+                self.webw_count.setValue(int(j.get("webw_count", self.webw_count.value())))
+            except Exception:
+                pass
+            self.webw_send_auth.setChecked(bool(j.get("webw_send_auth", self.webw_send_auth.isChecked())))
+            try:
+                self.webw_scan_iters.setValue(int(j.get("webw_scan_iters", self.webw_scan_iters.value())))
+            except Exception:
+                pass
+            try:
+                self.webw_scan_max_results.setValue(int(j.get("webw_scan_max_results", self.webw_scan_max_results.value())))
+            except Exception:
+                pass
+            try:
+                self.webw_scan_threads.setValue(int(j.get("webw_scan_threads", self.webw_scan_threads.value())))
+            except Exception:
+                pass
+            try:
+                self.webw_poll_max_msgs.setValue(int(j.get("webw_poll_max_msgs", self.webw_poll_max_msgs.value())))
+            except Exception:
+                pass
+            try:
+                self.webw_sleep_ms.setValue(int(j.get("webw_sleep_ms", self.webw_sleep_ms.value())))
+            except Exception:
+                pass
+            try:
+                self.webw_poll_first.setChecked(bool(j.get("webw_poll_first", self.webw_poll_first.isChecked())))
+            except Exception:
+                pass
 
             # splitter state
             try:
@@ -2313,6 +2883,8 @@ class MainWindow(QMainWindow):
                 "api_randomx": bool(self.cb_api_randomx.isChecked()),
                 "api_web": bool(self.cb_api_web.isChecked()),
                 "api_p2pool": bool(self.cb_api_p2pool.isChecked()),
+                "api_webworker": bool(self.cb_api_webworker.isChecked()),
+                "api_process": bool(self.cb_api_process.isChecked()),
                 "randomx_dll": self.ed_randomx_dll.text().strip(),
                 "p2pool_extra": self.ed_p2pool_extra.text().strip(),
 
@@ -2336,6 +2908,18 @@ class MainWindow(QMainWindow):
                 "p2_open_rig": self.p2_open_rig.text().strip(),
                 "p2_open_threads": int(self.p2_open_threads.value()),
                 "p2_open_extra_json": self.p2_open_extra_json.toPlainText(),
+
+                # webworker harness defaults
+                "webw_base": self.webw_base.text().strip(),
+                "webw_worker_url": self.webw_worker_url.text().strip(),
+                "webw_count": int(self.webw_count.value()),
+                "webw_send_auth": bool(self.webw_send_auth.isChecked()),
+                "webw_scan_iters": int(self.webw_scan_iters.value()),
+                "webw_scan_max_results": int(self.webw_scan_max_results.value()),
+                "webw_scan_threads": int(self.webw_scan_threads.value()),
+                "webw_poll_max_msgs": int(self.webw_poll_max_msgs.value()),
+                "webw_sleep_ms": int(self.webw_sleep_ms.value()),
+                "webw_poll_first": bool(self.webw_poll_first.isChecked()),
 
                 "main_split_state": _b64e(bytes(self.main_split.saveState())),
                 "left_tab": int(self.left_tabs.currentIndex()),
