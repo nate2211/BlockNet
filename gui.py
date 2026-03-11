@@ -1,4 +1,3 @@
-# gui.py
 from __future__ import annotations
 
 import base64
@@ -342,6 +341,8 @@ class MainWindow(QMainWindow):
         sc = QScrollArea()
         sc.setWidgetResizable(True)
         sc.setFrameShape(QScrollArea.NoFrame)
+        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        sc.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         sc.setWidget(inner)
         return sc
 
@@ -456,6 +457,7 @@ class MainWindow(QMainWindow):
         l2 = QVBoxLayout(gb2)
         self.btn_api_ping = QPushButton("API: /v1/ping")
         self.btn_rx_status = QPushButton("API: RandomX status")
+        self.btn_gpu_status_quick = QPushButton("API: GPU status")
         self.btn_net_status = QPushButton("API: Network status")
         self.btn_audio_status = QPushButton("API: Audio status")
         self.btn_audio_ui = QPushButton("Open Audio UI")
@@ -464,6 +466,7 @@ class MainWindow(QMainWindow):
         self.btn_web_test = QPushButton("API: Web fetch (example.com)")
         l2.addWidget(self.btn_api_ping)
         l2.addWidget(self.btn_rx_status)
+        l2.addWidget(self.btn_gpu_status_quick)
         l2.addWidget(self.btn_net_status)
         l2.addWidget(self.btn_audio_status)
         l2.addWidget(self.btn_audio_ui)
@@ -474,6 +477,7 @@ class MainWindow(QMainWindow):
 
         self.btn_api_ping.clicked.connect(self._do_api_ping)
         self.btn_rx_status.clicked.connect(self._do_randomx_status)
+        self.btn_gpu_status_quick.clicked.connect(self._do_gpu_status)
         self.btn_net_status.clicked.connect(self._do_network_status)
         self.btn_audio_status.clicked.connect(self._do_audio_status)
         self.btn_audio_ui.clicked.connect(self._do_audio_open_ui)
@@ -800,6 +804,87 @@ class MainWindow(QMainWindow):
         pfl.addRow("Bridge headers JSON", self.ed_python_headers_json)
 
         lay.addWidget(gbp)
+
+        gbg = QGroupBox("GPU API / OpenCL")
+        gfl = QFormLayout(gbg)
+
+        self.cb_api_gpu = QCheckBox("Enable GPU API (--api-gpu on)")
+        self.cb_api_gpu.setChecked(False)
+
+        self.cb_gpu_local_only = QCheckBox("GPU routes localhost only (--api-gpu-local-only on)")
+        self.cb_gpu_local_only.setChecked(True)
+
+        self.cb_gpu_auto_select = QCheckBox("Auto-select GPU (--api-gpu-auto-select on)")
+        self.cb_gpu_auto_select.setChecked(True)
+
+        self.cb_gpu_auto_build = QCheckBox("Auto-build kernel (--api-gpu-auto-build on)")
+        self.cb_gpu_auto_build.setChecked(True)
+
+        self.ed_gpu_opencl_loader = QLineEdit("OpenCL.dll")
+        self.btn_gpu_opencl_loader = QPushButton("Browse…")
+
+        self.ed_gpu_kernel_path = QLineEdit("blocknet_randomx_vm_opencl.cl")
+        self.btn_gpu_kernel_path = QPushButton("Browse…")
+
+        self.ed_gpu_scan_entry = QLineEdit("blocknet_randomx_vm_scan")
+        self.ed_gpu_hash_batch_entry = QLineEdit("blocknet_randomx_vm_hash_batch")
+        self.ed_gpu_bench_entry = QLineEdit("blocknet_vm_bench")
+
+        self.ed_gpu_build_options = QLineEdit(
+            "-cl-std=CL1.2 -DBN_VM_PROGRAM_WORDS=128 -DBN_VM_SCRATCHPAD_BYTES=2048 -DBN_VM_ROUNDS=1"
+        )
+
+        self.sp_gpu_max_kernel_kb = QSpinBox()
+        self.sp_gpu_max_kernel_kb.setRange(64, 16384)
+        self.sp_gpu_max_kernel_kb.setValue(2048)
+
+        self.sp_gpu_max_blob_bytes = QSpinBox()
+        self.sp_gpu_max_blob_bytes.setRange(16, 65536)
+        self.sp_gpu_max_blob_bytes.setValue(256)
+
+        self.sp_gpu_max_seed_bytes = QSpinBox()
+        self.sp_gpu_max_seed_bytes.setRange(16, 65536)
+        self.sp_gpu_max_seed_bytes.setValue(256)
+
+        self.sp_gpu_max_results = QSpinBox()
+        self.sp_gpu_max_results.setRange(1, 4096)
+        self.sp_gpu_max_results.setValue(64)
+
+        self.sp_gpu_default_iters = QSpinBox()
+        self.sp_gpu_default_iters.setRange(1, 100_000_000)
+        self.sp_gpu_default_iters.setSingleStep(1024)
+        self.sp_gpu_default_iters.setValue(65536)
+
+        self.sp_gpu_local_work_size = QSpinBox()
+        self.sp_gpu_local_work_size.setRange(0, 8192)
+        self.sp_gpu_local_work_size.setValue(0)
+
+        self.btn_gpu_opencl_loader.clicked.connect(lambda: self._browse_file_into(self.ed_gpu_opencl_loader))
+        self.btn_gpu_kernel_path.clicked.connect(
+            lambda: self._browse_file_into(
+                self.ed_gpu_kernel_path,
+                "OpenCL kernels (*.cl);;Text files (*.txt);;All files (*.*)"
+            )
+        )
+
+        gfl.addRow(self.cb_api_gpu)
+        gfl.addRow(self.cb_gpu_local_only)
+        gfl.addRow(self.cb_gpu_auto_select)
+        gfl.addRow(self.cb_gpu_auto_build)
+        gfl.addRow("OpenCL loader", _hbox(self.ed_gpu_opencl_loader, self.btn_gpu_opencl_loader))
+        gfl.addRow("Kernel path", _hbox(self.ed_gpu_kernel_path, self.btn_gpu_kernel_path))
+        gfl.addRow("Scan entry", self.ed_gpu_scan_entry)
+        gfl.addRow("Hash-batch entry", self.ed_gpu_hash_batch_entry)
+        gfl.addRow("Bench entry", self.ed_gpu_bench_entry)
+        gfl.addRow("Build options", self.ed_gpu_build_options)
+        gfl.addRow("Max kernel (KB)", self.sp_gpu_max_kernel_kb)
+        gfl.addRow("Max blob bytes", self.sp_gpu_max_blob_bytes)
+        gfl.addRow("Max seed bytes", self.sp_gpu_max_seed_bytes)
+        gfl.addRow("Max results", self.sp_gpu_max_results)
+        gfl.addRow("Default iters", self.sp_gpu_default_iters)
+        gfl.addRow("Local work size (0=auto)", self.sp_gpu_local_work_size)
+
+        lay.addWidget(gbg)
         lay.addStretch(1)
         self.left_tabs.addTab(self._wrap_scroll(tab), "API Config")
 
@@ -866,20 +951,13 @@ class MainWindow(QMainWindow):
         self.right_tabs.addTab(self._wrap_scroll(self._tab_web()), "API: Web")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_media()), "API: Media")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_randomx()), "API: RandomX")
+        self.right_tabs.addTab(self._wrap_scroll(self._tab_gpu()), "API: GPU")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_p2pool()), "API: P2Pool")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_network()), "API: Network")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_audio()), "API: Audio")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_python()), "API: Python")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_webworker()), "API: WebWorker")
 
-    def _wrap_scroll(self, inner: QWidget) -> QWidget:
-        sc = QScrollArea()
-        sc.setWidgetResizable(True)
-        sc.setFrameShape(QScrollArea.NoFrame)
-        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        sc.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        sc.setWidget(inner)
-        return sc
     def _mk_api_out(self) -> QPlainTextEdit:
         w = QPlainTextEdit()
         w.setReadOnly(True)
@@ -1213,6 +1291,119 @@ class MainWindow(QMainWindow):
 
         self.rx_out = self._mk_api_out()
         lay.addWidget(self.rx_out, 1)
+        return tab
+
+    def _tab_gpu(self) -> QWidget:
+        tab = QWidget()
+        lay = QVBoxLayout(tab)
+
+        gb0 = QGroupBox("GPU status / devices / build")
+        fl0 = QFormLayout(gb0)
+
+        self.gpu_platform_index = QSpinBox()
+        self.gpu_platform_index.setRange(0, 256)
+        self.gpu_platform_index.setValue(0)
+
+        self.gpu_device_index = QSpinBox()
+        self.gpu_device_index.setRange(0, 256)
+        self.gpu_device_index.setValue(0)
+
+        row0 = QHBoxLayout()
+        self.btn_gpu_status = QPushButton("Status")
+        self.btn_gpu_devices = QPushButton("Devices")
+        self.btn_gpu_select = QPushButton("Select device")
+        self.btn_gpu_build = QPushButton("Build kernel")
+        row0.addWidget(self.btn_gpu_status)
+        row0.addWidget(self.btn_gpu_devices)
+        row0.addWidget(self.btn_gpu_select)
+        row0.addWidget(self.btn_gpu_build)
+
+        self.btn_gpu_status.clicked.connect(self._do_gpu_status)
+        self.btn_gpu_devices.clicked.connect(self._do_gpu_devices)
+        self.btn_gpu_select.clicked.connect(self._do_gpu_select_device)
+        self.btn_gpu_build.clicked.connect(self._do_gpu_build)
+
+        fl0.addRow("platform_index", self.gpu_platform_index)
+        fl0.addRow("device_index", self.gpu_device_index)
+        fl0.addRow(row0)
+
+        gb1 = QGroupBox("POST /v1/gpu/scan")
+        fl1 = QFormLayout(gb1)
+
+        self.gpu_seed_hex = QLineEdit("")
+        self.gpu_blob_hex = QPlainTextEdit()
+        self.gpu_blob_hex.setFont(self.mono)
+
+        self.gpu_nonce_offset = QSpinBox()
+        self.gpu_nonce_offset.setRange(0, 65535)
+        self.gpu_nonce_offset.setValue(39)
+
+        self.gpu_start_nonce = QSpinBox()
+        self.gpu_start_nonce.setRange(0, 2_147_483_647)
+        self.gpu_start_nonce.setValue(0)
+
+        self.gpu_scan_iters = QSpinBox()
+        self.gpu_scan_iters.setRange(1, 100_000_000)
+        self.gpu_scan_iters.setSingleStep(1024)
+        self.gpu_scan_iters.setValue(65536)
+
+        self.gpu_target64 = QLineEdit("18446744073709551615")
+        self.gpu_max_results = QSpinBox()
+        self.gpu_max_results.setRange(1, 4096)
+        self.gpu_max_results.setValue(16)
+
+        self.btn_gpu_scan = QPushButton("Run GPU scan")
+        self.btn_gpu_scan.clicked.connect(self._do_gpu_scan)
+
+        fl1.addRow("seed_hex", self.gpu_seed_hex)
+        fl1.addRow("blob_hex", self.gpu_blob_hex)
+        fl1.addRow("nonce_offset", self.gpu_nonce_offset)
+        fl1.addRow("start_nonce", self.gpu_start_nonce)
+        fl1.addRow("iters", self.gpu_scan_iters)
+        fl1.addRow("target64", self.gpu_target64)
+        fl1.addRow("max_results", self.gpu_max_results)
+        fl1.addRow(self.btn_gpu_scan)
+
+        gb2 = QGroupBox("POST /v1/gpu/hash_batch")
+        fl2 = QFormLayout(gb2)
+
+        self.gpu_hash_batch_iters = QSpinBox()
+        self.gpu_hash_batch_iters.setRange(1, 1_000_000)
+        self.gpu_hash_batch_iters.setSingleStep(256)
+        self.gpu_hash_batch_iters.setValue(1024)
+
+        self.btn_gpu_hash_batch = QPushButton("Run GPU hash_batch")
+        self.btn_gpu_hash_batch.clicked.connect(self._do_gpu_hash_batch)
+
+        fl2.addRow("iters", self.gpu_hash_batch_iters)
+        fl2.addRow(self.btn_gpu_hash_batch)
+
+        gb3 = QGroupBox("POST /v1/gpu/bench")
+        fl3 = QFormLayout(gb3)
+
+        self.gpu_bench_iters = QSpinBox()
+        self.gpu_bench_iters.setRange(1, 10_000_000)
+        self.gpu_bench_iters.setSingleStep(1024)
+        self.gpu_bench_iters.setValue(65536)
+
+        self.gpu_bench_loops = QSpinBox()
+        self.gpu_bench_loops.setRange(1, 100000)
+        self.gpu_bench_loops.setValue(256)
+
+        self.btn_gpu_bench = QPushButton("Run GPU bench")
+        self.btn_gpu_bench.clicked.connect(self._do_gpu_bench)
+
+        fl3.addRow("iters", self.gpu_bench_iters)
+        fl3.addRow("loops", self.gpu_bench_loops)
+        fl3.addRow(self.btn_gpu_bench)
+
+        lay.addWidget(gb0)
+        lay.addWidget(gb1)
+        lay.addWidget(gb2)
+        lay.addWidget(gb3)
+
+        self.gpu_out = self._mk_api_out()
+        lay.addWidget(self.gpu_out, 1)
         return tab
 
     def _tab_p2pool(self) -> QWidget:
@@ -1996,8 +2187,7 @@ bn_setPreset(window.__bn_preset);
                 self.webw_view.setMinimumHeight(520)
                 try:
                     if QUrl is not None:
-                        self.webw_view.setHtml(self._webworker_harness_html(),
-                                               QUrl("about:blank"))  # type: ignore[arg-type]
+                        self.webw_view.setHtml(self._webworker_harness_html(), QUrl("about:blank"))  # type: ignore[arg-type]
                     else:
                         self.webw_view.setHtml(self._webworker_harness_html())
                 except Exception:
@@ -2553,6 +2743,45 @@ bn_setPreset(window.__bn_preset);
                 if hdrs:
                     args += ["--api-python-headers-json", hdrs]
 
+            if self.cb_api_gpu.isChecked():
+                args += ["--api-gpu", "on"]
+                args += ["--api-gpu-local-only", "on" if self.cb_gpu_local_only.isChecked() else "off"]
+                args += ["--api-gpu-auto-select", "on" if self.cb_gpu_auto_select.isChecked() else "off"]
+                args += ["--api-gpu-auto-build", "on" if self.cb_gpu_auto_build.isChecked() else "off"]
+
+                ocl_loader = self.ed_gpu_opencl_loader.text().strip()
+                if ocl_loader:
+                    args += ["--api-gpu-opencl-loader", ocl_loader]
+
+                kernel_path = self.ed_gpu_kernel_path.text().strip()
+                if kernel_path:
+                    args += ["--api-gpu-kernel-path", kernel_path]
+
+                scan_entry = self.ed_gpu_scan_entry.text().strip()
+                if scan_entry:
+                    args += ["--api-gpu-kernel-scan-entry", scan_entry]
+
+                hash_batch_entry = self.ed_gpu_hash_batch_entry.text().strip()
+                if hash_batch_entry:
+                    args += ["--api-gpu-kernel-hash-batch-entry", hash_batch_entry]
+
+                bench_entry = self.ed_gpu_bench_entry.text().strip()
+                if bench_entry:
+                    args += ["--api-gpu-kernel-bench-entry", bench_entry]
+
+                build_opts = self.ed_gpu_build_options.text().strip()
+                if build_opts:
+                    args += ["--api-gpu-build-options", build_opts]
+
+                args += ["--api-gpu-max-kernel-bytes", str(int(self.sp_gpu_max_kernel_kb.value()) * 1024)]
+                args += ["--api-gpu-max-blob-bytes", str(int(self.sp_gpu_max_blob_bytes.value()))]
+                args += ["--api-gpu-max-seed-bytes", str(int(self.sp_gpu_max_seed_bytes.value()))]
+                args += ["--api-gpu-max-results", str(int(self.sp_gpu_max_results.value()))]
+                args += ["--api-gpu-default-iters", str(int(self.sp_gpu_default_iters.value()))]
+
+                if int(self.sp_gpu_local_work_size.value()) > 0:
+                    args += ["--api-gpu-local-work-size", str(int(self.sp_gpu_local_work_size.value()))]
+
         proxy_on = self.cb_proxy.isChecked()
         gateway_on = self.cb_gateway.isChecked()
 
@@ -2894,6 +3123,114 @@ bn_setPreset(window.__bn_preset);
             self._append_json(self.rx_out, j)
         except Exception as e:
             self._append_plain(self.rx_out, f"randomx hash_batch error: {e}")
+
+    def _do_gpu_status(self) -> None:
+        try:
+            j = self._http_json("GET", "/gpu/status", None, prefix=self._api_prefix())
+            self.gpu_out.setPlainText("")
+            self._append_json(self.gpu_out, j)
+            self._append_json(self.txt_out, j)
+        except Exception as e:
+            self._append_plain(self.gpu_out, f"gpu status error: {e}")
+
+    def _do_gpu_devices(self) -> None:
+        try:
+            j = self._http_json("GET", "/gpu/devices", None, prefix=self._api_prefix())
+            self.gpu_out.setPlainText("")
+            self._append_json(self.gpu_out, j)
+        except Exception as e:
+            self._append_plain(self.gpu_out, f"gpu devices error: {e}")
+
+    def _do_gpu_select_device(self) -> None:
+        try:
+            body = {
+                "platform_index": int(self.gpu_platform_index.value()),
+                "device_index": int(self.gpu_device_index.value()),
+            }
+            j = self._http_json("POST", "/gpu/select_device", body, prefix=self._api_prefix())
+            self.gpu_out.setPlainText("")
+            self._append_json(self.gpu_out, j)
+        except Exception as e:
+            self._append_plain(self.gpu_out, f"gpu select_device error: {e}")
+
+    def _do_gpu_build(self) -> None:
+        try:
+            body = {
+                "path": self.ed_gpu_kernel_path.text().strip(),
+                "build_options": self.ed_gpu_build_options.text().strip(),
+                "scan_entry": self.ed_gpu_scan_entry.text().strip(),
+                "hash_batch_entry": self.ed_gpu_hash_batch_entry.text().strip(),
+                "bench_entry": self.ed_gpu_bench_entry.text().strip(),
+            }
+            j = self._http_json("POST", "/gpu/build", body, prefix=self._api_prefix())
+            self.gpu_out.setPlainText("")
+            self._append_json(self.gpu_out, j)
+        except Exception as e:
+            self._append_plain(self.gpu_out, f"gpu build error: {e}")
+
+    def _do_gpu_scan(self) -> None:
+        try:
+            seed_hex = self.gpu_seed_hex.text().strip()
+            blob_hex = self.gpu_blob_hex.toPlainText().strip()
+            if not seed_hex:
+                raise ValueError("seed_hex required")
+            if not blob_hex:
+                raise ValueError("blob_hex required")
+
+            body = {
+                "seed_hex": seed_hex,
+                "blob_hex": blob_hex,
+                "nonce_offset": int(self.gpu_nonce_offset.value()),
+                "start_nonce": int(self.gpu_start_nonce.value()),
+                "iters": int(self.gpu_scan_iters.value()),
+                "target64": int(self.gpu_target64.text().strip(), 0),
+                "max_results": int(self.gpu_max_results.value()),
+                "platform_index": int(self.gpu_platform_index.value()),
+                "device_index": int(self.gpu_device_index.value()),
+            }
+
+            j = self._http_json("POST", "/gpu/scan", body, prefix=self._api_prefix())
+            self.gpu_out.setPlainText("")
+            self._append_json(self.gpu_out, j)
+        except Exception as e:
+            self._append_plain(self.gpu_out, f"gpu scan error: {e}")
+
+    def _do_gpu_hash_batch(self) -> None:
+        try:
+            seed_hex = self.gpu_seed_hex.text().strip()
+            blob_hex = self.gpu_blob_hex.toPlainText().strip()
+            if not seed_hex:
+                raise ValueError("seed_hex required")
+            if not blob_hex:
+                raise ValueError("blob_hex required")
+
+            body = {
+                "seed_hex": seed_hex,
+                "blob_hex": blob_hex,
+                "nonce_offset": int(self.gpu_nonce_offset.value()),
+                "start_nonce": int(self.gpu_start_nonce.value()),
+                "iters": int(self.gpu_hash_batch_iters.value()),
+                "platform_index": int(self.gpu_platform_index.value()),
+                "device_index": int(self.gpu_device_index.value()),
+            }
+
+            j = self._http_json("POST", "/gpu/hash_batch", body, prefix=self._api_prefix())
+            self.gpu_out.setPlainText("")
+            self._append_json(self.gpu_out, j)
+        except Exception as e:
+            self._append_plain(self.gpu_out, f"gpu hash_batch error: {e}")
+
+    def _do_gpu_bench(self) -> None:
+        try:
+            body = {
+                "iters": int(self.gpu_bench_iters.value()),
+                "loops": int(self.gpu_bench_loops.value()),
+            }
+            j = self._http_json("POST", "/gpu/bench", body, prefix=self._api_prefix())
+            self.gpu_out.setPlainText("")
+            self._append_json(self.gpu_out, j)
+        except Exception as e:
+            self._append_plain(self.gpu_out, f"gpu bench error: {e}")
 
     def _do_web_example(self) -> None:
         self.web_url.setText("https://example.com")
@@ -3542,6 +3879,10 @@ bn_setPreset(window.__bn_preset);
             self.ed_python_spool_dir, self.ed_python_exe, self.ed_python_bridge_host,
             self.ed_python_blocknet_url, self.ed_python_blocknet_prefix, self.ed_python_headers_json,
 
+            self.ed_gpu_opencl_loader, self.ed_gpu_kernel_path,
+            self.ed_gpu_scan_entry, self.ed_gpu_hash_batch_entry,
+            self.ed_gpu_bench_entry, self.ed_gpu_build_options,
+
             self.webw_base, self.webw_miner_url, self.webw_rx_url, self.webw_hash_url, self.webw_rx_wasm_url,
         ]
         for e in edits:
@@ -3557,6 +3898,12 @@ bn_setPreset(window.__bn_preset);
             self.sp_audio_scan_expand_pages, self.sp_audio_scan_max_links,
             self.sp_python_bridge_port,
             self.p2_open_threads,
+            self.sp_gpu_max_kernel_kb, self.sp_gpu_max_blob_bytes, self.sp_gpu_max_seed_bytes,
+            self.sp_gpu_max_results, self.sp_gpu_default_iters, self.sp_gpu_local_work_size,
+            self.gpu_platform_index, self.gpu_device_index,
+            self.gpu_nonce_offset, self.gpu_start_nonce, self.gpu_scan_iters,
+            self.gpu_max_results, self.gpu_hash_batch_iters,
+            self.gpu_bench_iters, self.gpu_bench_loops,
             self.webw_miner_count, self.webw_scan_iters, self.webw_scan_max_results,
             self.webw_scan_threads, self.webw_poll_max_msgs, self.webw_sleep_ms,
             self.webw_rx_count, self.webw_rx_hash_ms, self.webw_rx_batch_ms,
@@ -3569,6 +3916,7 @@ bn_setPreset(window.__bn_preset);
             self.cb_api, self.cb_api_media, self.cb_api_randomx, self.cb_api_web,
             self.cb_api_p2pool, self.cb_api_webworker, self.cb_api_process,
             self.cb_api_network, self.cb_network_set_ipv4, self.cb_api_audio, self.cb_api_python,
+            self.cb_api_gpu, self.cb_gpu_local_only, self.cb_gpu_auto_select, self.cb_gpu_auto_build,
             self.cb_web_block_private, self.cb_web_allow_http, self.cb_web_allow_https,
             self.cb_audio_persist, self.cb_audio_use_proxy, self.cb_audio_block_private,
             self.cb_python_serve, self.cb_python_control, self.cb_python_control_local,
@@ -3583,6 +3931,10 @@ bn_setPreset(window.__bn_preset);
         self.p2_open_wallet.textChanged.connect(self._schedule_save)
         self.p2_open_rig.textChanged.connect(self._schedule_save)
         self.p2_open_extra_json.textChanged.connect(self._schedule_save)
+
+        self.gpu_seed_hex.textChanged.connect(self._schedule_save)
+        self.gpu_blob_hex.textChanged.connect(self._schedule_save)
+        self.gpu_target64.textChanged.connect(self._schedule_save)
 
     def closeEvent(self, ev) -> None:
         self._save_cfg()
@@ -3674,6 +4026,38 @@ bn_setPreset(window.__bn_preset);
             self.ed_python_blocknet_prefix.setText(j.get("python_blocknet_prefix", self.ed_python_blocknet_prefix.text()))
             self.ed_python_headers_json.setText(j.get("python_headers_json", self.ed_python_headers_json.text()))
 
+            self.cb_api_gpu.setChecked(bool(j.get("api_gpu", False)))
+            self.cb_gpu_local_only.setChecked(bool(j.get("gpu_local_only", True)))
+            self.cb_gpu_auto_select.setChecked(bool(j.get("gpu_auto_select", True)))
+            self.cb_gpu_auto_build.setChecked(bool(j.get("gpu_auto_build", True)))
+
+            self.ed_gpu_opencl_loader.setText(j.get("gpu_opencl_loader", self.ed_gpu_opencl_loader.text()))
+            self.ed_gpu_kernel_path.setText(j.get("gpu_kernel_path", self.ed_gpu_kernel_path.text()))
+            self.ed_gpu_scan_entry.setText(j.get("gpu_scan_entry", self.ed_gpu_scan_entry.text()))
+            self.ed_gpu_hash_batch_entry.setText(j.get("gpu_hash_batch_entry", self.ed_gpu_hash_batch_entry.text()))
+            self.ed_gpu_bench_entry.setText(j.get("gpu_bench_entry", self.ed_gpu_bench_entry.text()))
+            self.ed_gpu_build_options.setText(j.get("gpu_build_options", self.ed_gpu_build_options.text()))
+
+            self.sp_gpu_max_kernel_kb.setValue(int(j.get("gpu_max_kernel_kb", self.sp_gpu_max_kernel_kb.value())))
+            self.sp_gpu_max_blob_bytes.setValue(int(j.get("gpu_max_blob_bytes", self.sp_gpu_max_blob_bytes.value())))
+            self.sp_gpu_max_seed_bytes.setValue(int(j.get("gpu_max_seed_bytes", self.sp_gpu_max_seed_bytes.value())))
+            self.sp_gpu_max_results.setValue(int(j.get("gpu_max_results_cfg", self.sp_gpu_max_results.value())))
+            self.sp_gpu_default_iters.setValue(int(j.get("gpu_default_iters", self.sp_gpu_default_iters.value())))
+            self.sp_gpu_local_work_size.setValue(int(j.get("gpu_local_work_size", self.sp_gpu_local_work_size.value())))
+
+            self.gpu_platform_index.setValue(int(j.get("gpu_platform_index", self.gpu_platform_index.value())))
+            self.gpu_device_index.setValue(int(j.get("gpu_device_index", self.gpu_device_index.value())))
+            self.gpu_seed_hex.setText(j.get("gpu_seed_hex", self.gpu_seed_hex.text()))
+            self.gpu_blob_hex.setPlainText(j.get("gpu_blob_hex", self.gpu_blob_hex.toPlainText()))
+            self.gpu_nonce_offset.setValue(int(j.get("gpu_nonce_offset", self.gpu_nonce_offset.value())))
+            self.gpu_start_nonce.setValue(int(j.get("gpu_start_nonce", self.gpu_start_nonce.value())))
+            self.gpu_scan_iters.setValue(int(j.get("gpu_scan_iters_ui", self.gpu_scan_iters.value())))
+            self.gpu_target64.setText(j.get("gpu_target64", self.gpu_target64.text()))
+            self.gpu_max_results.setValue(int(j.get("gpu_scan_max_results_ui", self.gpu_max_results.value())))
+            self.gpu_hash_batch_iters.setValue(int(j.get("gpu_hash_batch_iters", self.gpu_hash_batch_iters.value())))
+            self.gpu_bench_iters.setValue(int(j.get("gpu_bench_iters", self.gpu_bench_iters.value())))
+            self.gpu_bench_loops.setValue(int(j.get("gpu_bench_loops", self.gpu_bench_loops.value())))
+
             self.p2_open_host.setText(j.get("p2_open_host", self.p2_open_host.text()))
             self.p2_open_wallet.setText(j.get("p2_open_wallet", self.p2_open_wallet.text()))
             self.p2_open_rig.setText(j.get("p2_open_rig", self.p2_open_rig.text()))
@@ -3763,6 +4147,7 @@ bn_setPreset(window.__bn_preset);
                 "api_network": bool(self.cb_api_network.isChecked()),
                 "api_audio": bool(self.cb_api_audio.isChecked()),
                 "api_python": bool(self.cb_api_python.isChecked()),
+                "api_gpu": bool(self.cb_api_gpu.isChecked()),
 
                 "randomx_dll": self.ed_randomx_dll.text().strip(),
                 "p2pool_extra": self.ed_p2pool_extra.text().strip(),
@@ -3802,6 +4187,37 @@ bn_setPreset(window.__bn_preset);
                 "python_blocknet_url": self.ed_python_blocknet_url.text().strip(),
                 "python_blocknet_prefix": self.ed_python_blocknet_prefix.text().strip(),
                 "python_headers_json": self.ed_python_headers_json.text().strip(),
+
+                "gpu_local_only": bool(self.cb_gpu_local_only.isChecked()),
+                "gpu_auto_select": bool(self.cb_gpu_auto_select.isChecked()),
+                "gpu_auto_build": bool(self.cb_gpu_auto_build.isChecked()),
+
+                "gpu_opencl_loader": self.ed_gpu_opencl_loader.text().strip(),
+                "gpu_kernel_path": self.ed_gpu_kernel_path.text().strip(),
+                "gpu_scan_entry": self.ed_gpu_scan_entry.text().strip(),
+                "gpu_hash_batch_entry": self.ed_gpu_hash_batch_entry.text().strip(),
+                "gpu_bench_entry": self.ed_gpu_bench_entry.text().strip(),
+                "gpu_build_options": self.ed_gpu_build_options.text().strip(),
+
+                "gpu_max_kernel_kb": int(self.sp_gpu_max_kernel_kb.value()),
+                "gpu_max_blob_bytes": int(self.sp_gpu_max_blob_bytes.value()),
+                "gpu_max_seed_bytes": int(self.sp_gpu_max_seed_bytes.value()),
+                "gpu_max_results_cfg": int(self.sp_gpu_max_results.value()),
+                "gpu_default_iters": int(self.sp_gpu_default_iters.value()),
+                "gpu_local_work_size": int(self.sp_gpu_local_work_size.value()),
+
+                "gpu_platform_index": int(self.gpu_platform_index.value()),
+                "gpu_device_index": int(self.gpu_device_index.value()),
+                "gpu_seed_hex": self.gpu_seed_hex.text().strip(),
+                "gpu_blob_hex": self.gpu_blob_hex.toPlainText(),
+                "gpu_nonce_offset": int(self.gpu_nonce_offset.value()),
+                "gpu_start_nonce": int(self.gpu_start_nonce.value()),
+                "gpu_scan_iters_ui": int(self.gpu_scan_iters.value()),
+                "gpu_target64": self.gpu_target64.text().strip(),
+                "gpu_scan_max_results_ui": int(self.gpu_max_results.value()),
+                "gpu_hash_batch_iters": int(self.gpu_hash_batch_iters.value()),
+                "gpu_bench_iters": int(self.gpu_bench_iters.value()),
+                "gpu_bench_loops": int(self.gpu_bench_loops.value()),
 
                 "p2_open_host": self.p2_open_host.text().strip(),
                 "p2_open_wallet": self.p2_open_wallet.text().strip(),
