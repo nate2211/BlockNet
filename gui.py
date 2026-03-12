@@ -457,6 +457,7 @@ class MainWindow(QMainWindow):
         l2 = QVBoxLayout(gb2)
         self.btn_api_ping = QPushButton("API: /v1/ping")
         self.btn_rx_status = QPushButton("API: RandomX status")
+        self.btn_cpu_status_quick = QPushButton("API: CPU status")
         self.btn_gpu_status_quick = QPushButton("API: GPU status")
         self.btn_net_status = QPushButton("API: Network status")
         self.btn_audio_status = QPushButton("API: Audio status")
@@ -466,6 +467,7 @@ class MainWindow(QMainWindow):
         self.btn_web_test = QPushButton("API: Web fetch (example.com)")
         l2.addWidget(self.btn_api_ping)
         l2.addWidget(self.btn_rx_status)
+        l2.addWidget(self.btn_cpu_status_quick)
         l2.addWidget(self.btn_gpu_status_quick)
         l2.addWidget(self.btn_net_status)
         l2.addWidget(self.btn_audio_status)
@@ -477,6 +479,7 @@ class MainWindow(QMainWindow):
 
         self.btn_api_ping.clicked.connect(self._do_api_ping)
         self.btn_rx_status.clicked.connect(self._do_randomx_status)
+        self.btn_cpu_status_quick.clicked.connect(self._do_cpu_status)
         self.btn_gpu_status_quick.clicked.connect(self._do_gpu_status)
         self.btn_net_status.clicked.connect(self._do_network_status)
         self.btn_audio_status.clicked.connect(self._do_audio_status)
@@ -650,6 +653,9 @@ class MainWindow(QMainWindow):
         self.cb_api_python = QCheckBox("Enable Python API (--api-python on)")
         self.cb_api_python.setChecked(False)
 
+        self.cb_api_cpu = QCheckBox("Enable CPU API (--api-cpu on)")
+        self.cb_api_cpu.setChecked(False)
+
         fl.addRow(self.cb_api)
         fl.addRow("API prefix", self.ed_api_prefix)
         fl.addRow(self.cb_api_media)
@@ -667,6 +673,7 @@ class MainWindow(QMainWindow):
         fl.addRow("Interface IPv4 CIDR", self.ed_network_ipv4)
         fl.addRow(self.cb_api_audio)
         fl.addRow(self.cb_api_python)
+        fl.addRow(self.cb_api_cpu)
 
         self.btn_randomx_dll.clicked.connect(lambda: self._browse_file_into(self.ed_randomx_dll))
         self.btn_network_wintun_dll.clicked.connect(lambda: self._browse_file_into(self.ed_network_wintun_dll))
@@ -805,6 +812,73 @@ class MainWindow(QMainWindow):
 
         lay.addWidget(gbp)
 
+        # ---------------- CPU API / RandomX CPU backend ----------------
+        gbc = QGroupBox("CPU API / RandomX CPU backend")
+        cfl = QFormLayout(gbc)
+
+        self.ed_cpu_dll = QLineEdit(r".\randomx-dll.dll")
+        self.btn_cpu_dll = QPushButton("Browse…")
+        self.btn_cpu_dll.clicked.connect(lambda: self._browse_file_into(self.ed_cpu_dll))
+
+        self.sp_cpu_hash_threads = QSpinBox()
+        self.sp_cpu_hash_threads.setRange(0, 4096)
+        self.sp_cpu_hash_threads.setValue(0)
+
+        self.sp_cpu_scan_threads = QSpinBox()
+        self.sp_cpu_scan_threads.setRange(0, 4096)
+        self.sp_cpu_scan_threads.setValue(0)
+
+        self.sp_cpu_scan_min_iters = QSpinBox()
+        self.sp_cpu_scan_min_iters.setRange(1, 10_000_000)
+        self.sp_cpu_scan_min_iters.setValue(80_000)
+
+        self.sp_cpu_max_input_kb = QSpinBox()
+        self.sp_cpu_max_input_kb.setRange(1, 8192)
+        self.sp_cpu_max_input_kb.setValue(1024)
+
+        self.sp_cpu_max_batch_items = QSpinBox()
+        self.sp_cpu_max_batch_items.setRange(1, 100_000)
+        self.sp_cpu_max_batch_items.setValue(1000)
+
+        self.sp_cpu_max_batch_total_kb = QSpinBox()
+        self.sp_cpu_max_batch_total_kb.setRange(1, 65_536)
+        self.sp_cpu_max_batch_total_kb.setValue(4096)
+
+        self.sp_cpu_max_scan_iters = QSpinBox()
+        self.sp_cpu_max_scan_iters.setRange(1, 100_000_000)
+        self.sp_cpu_max_scan_iters.setValue(2_000_000)
+
+        self.sp_cpu_max_scan_results = QSpinBox()
+        self.sp_cpu_max_scan_results.setRange(1, 4096)
+        self.sp_cpu_max_scan_results.setValue(64)
+
+        self.sp_cpu_nonce_offset_cfg = QSpinBox()
+        self.sp_cpu_nonce_offset_cfg.setRange(0, 65535)
+        self.sp_cpu_nonce_offset_cfg.setValue(39)
+
+        self.sp_cpu_bench_iters_cfg = QSpinBox()
+        self.sp_cpu_bench_iters_cfg.setRange(1, 100_000_000)
+        self.sp_cpu_bench_iters_cfg.setValue(200_000)
+
+        self.sp_cpu_bench_loops_cfg = QSpinBox()
+        self.sp_cpu_bench_loops_cfg.setRange(1, 100_000)
+        self.sp_cpu_bench_loops_cfg.setValue(8)
+
+        cfl.addRow("CPU DLL", _hbox(self.ed_cpu_dll, self.btn_cpu_dll))
+        cfl.addRow("Hash threads (0=auto)", self.sp_cpu_hash_threads)
+        cfl.addRow("Scan threads (0=auto)", self.sp_cpu_scan_threads)
+        cfl.addRow("Scan min iters/thread", self.sp_cpu_scan_min_iters)
+        cfl.addRow("Max input (KB)", self.sp_cpu_max_input_kb)
+        cfl.addRow("Max batch items", self.sp_cpu_max_batch_items)
+        cfl.addRow("Max batch total (KB)", self.sp_cpu_max_batch_total_kb)
+        cfl.addRow("Max scan iters", self.sp_cpu_max_scan_iters)
+        cfl.addRow("Max scan results", self.sp_cpu_max_scan_results)
+        cfl.addRow("Default nonce offset", self.sp_cpu_nonce_offset_cfg)
+        cfl.addRow("Default bench iters", self.sp_cpu_bench_iters_cfg)
+        cfl.addRow("Default bench loops", self.sp_cpu_bench_loops_cfg)
+
+        lay.addWidget(gbc)
+
         gbg = QGroupBox("GPU API / OpenCL")
         gfl = QFormLayout(gbg)
 
@@ -826,8 +900,13 @@ class MainWindow(QMainWindow):
         self.ed_gpu_kernel_path = QLineEdit("blocknet_randomx_vm_opencl.cl")
         self.btn_gpu_kernel_path = QPushButton("Browse…")
 
-        self.ed_gpu_scan_entry = QLineEdit("blocknet_randomx_vm_scan")
-        self.ed_gpu_hash_batch_entry = QLineEdit("blocknet_randomx_vm_hash_batch")
+        # ---- separate base/ext entry names ----
+        self.ed_gpu_scan_base_entry = QLineEdit("blocknet_randomx_vm_scan")
+        self.ed_gpu_scan_ext_entry = QLineEdit("blocknet_randomx_vm_scan_ext")
+
+        self.ed_gpu_hash_batch_base_entry = QLineEdit("blocknet_randomx_vm_hash_batch")
+        self.ed_gpu_hash_batch_ext_entry = QLineEdit("blocknet_randomx_vm_hash_batch_ext")
+
         self.ed_gpu_bench_entry = QLineEdit("blocknet_vm_bench")
 
         self.ed_gpu_build_options = QLineEdit(
@@ -873,8 +952,10 @@ class MainWindow(QMainWindow):
         gfl.addRow(self.cb_gpu_auto_build)
         gfl.addRow("OpenCL loader", _hbox(self.ed_gpu_opencl_loader, self.btn_gpu_opencl_loader))
         gfl.addRow("Kernel path", _hbox(self.ed_gpu_kernel_path, self.btn_gpu_kernel_path))
-        gfl.addRow("Scan entry", self.ed_gpu_scan_entry)
-        gfl.addRow("Hash-batch entry", self.ed_gpu_hash_batch_entry)
+        gfl.addRow("Scan entry (base)", self.ed_gpu_scan_base_entry)
+        gfl.addRow("Scan entry (ext)", self.ed_gpu_scan_ext_entry)
+        gfl.addRow("Hash-batch entry (base)", self.ed_gpu_hash_batch_base_entry)
+        gfl.addRow("Hash-batch entry (ext)", self.ed_gpu_hash_batch_ext_entry)
         gfl.addRow("Bench entry", self.ed_gpu_bench_entry)
         gfl.addRow("Build options", self.ed_gpu_build_options)
         gfl.addRow("Max kernel (KB)", self.sp_gpu_max_kernel_kb)
@@ -951,6 +1032,7 @@ class MainWindow(QMainWindow):
         self.right_tabs.addTab(self._wrap_scroll(self._tab_web()), "API: Web")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_media()), "API: Media")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_randomx()), "API: RandomX")
+        self.right_tabs.addTab(self._wrap_scroll(self._tab_cpu()), "API: CPU")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_gpu()), "API: GPU")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_p2pool()), "API: P2Pool")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_network()), "API: Network")
@@ -1291,6 +1373,150 @@ class MainWindow(QMainWindow):
 
         self.rx_out = self._mk_api_out()
         lay.addWidget(self.rx_out, 1)
+        return tab
+
+    # ---------------- CPU tab ----------------
+
+    def _tab_cpu(self) -> QWidget:
+        tab = QWidget()
+        lay = QVBoxLayout(tab)
+
+        gb0 = QGroupBox("GET /v1/cpu/status")
+        fl0 = QFormLayout(gb0)
+        self.btn_cpu_status = QPushButton("Fetch CPU status")
+        self.btn_cpu_status.clicked.connect(self._do_cpu_status)
+        fl0.addRow(self.btn_cpu_status)
+
+        gb1 = QGroupBox("POST /v1/cpu/hash")
+        fl1 = QFormLayout(gb1)
+
+        self.cpu_seed_hex = QLineEdit("")
+        self.cpu_data_mode = QComboBox()
+        self.cpu_data_mode.addItems(["data_b64", "data_hex"])
+        self.cpu_data = QPlainTextEdit()
+        self.cpu_data.setFont(self.mono)
+
+        self.btn_cpu_hash = QPushButton("Compute CPU hash")
+        self.btn_cpu_hash.clicked.connect(self._do_cpu_hash)
+
+        fl1.addRow("seed_hex", self.cpu_seed_hex)
+        fl1.addRow("data mode", self.cpu_data_mode)
+        fl1.addRow("data", self.cpu_data)
+        fl1.addRow(self.btn_cpu_hash)
+
+        gb2 = QGroupBox("POST /v1/cpu/hash_batch")
+        fl2 = QFormLayout(gb2)
+
+        self.cpu_batch_threads = QSpinBox()
+        self.cpu_batch_threads.setRange(0, 4096)
+        self.cpu_batch_threads.setValue(0)
+
+        self.cpu_batch_items = QPlainTextEdit()
+        self.cpu_batch_items.setFont(self.mono)
+        self.cpu_batch_items.setPlainText(json.dumps([
+            {"data_hex": "00"},
+            {"data_hex": "ff"}
+        ], indent=2))
+
+        self.btn_cpu_hash_batch = QPushButton("Compute CPU hash batch")
+        self.btn_cpu_hash_batch.clicked.connect(self._do_cpu_hash_batch)
+
+        fl2.addRow("threads (0=auto)", self.cpu_batch_threads)
+        fl2.addRow("items (array or full body)", self.cpu_batch_items)
+        fl2.addRow(self.btn_cpu_hash_batch)
+
+        gb3 = QGroupBox("POST /v1/cpu/scan")
+        fl3 = QFormLayout(gb3)
+
+        self.cpu_scan_blob_hex = QPlainTextEdit()
+        self.cpu_scan_blob_hex.setFont(self.mono)
+
+        self.cpu_scan_nonce_offset = QSpinBox()
+        self.cpu_scan_nonce_offset.setRange(0, 65535)
+        self.cpu_scan_nonce_offset.setValue(39)
+
+        self.cpu_scan_start_nonce = QSpinBox()
+        self.cpu_scan_start_nonce.setRange(0, 2_147_483_647)
+        self.cpu_scan_start_nonce.setValue(0)
+
+        self.cpu_scan_iters = QSpinBox()
+        self.cpu_scan_iters.setRange(1, 100_000_000)
+        self.cpu_scan_iters.setSingleStep(1024)
+        self.cpu_scan_iters.setValue(200_000)
+
+        self.cpu_scan_target64 = QLineEdit("18446744073709551615")
+
+        self.cpu_scan_max_results = QSpinBox()
+        self.cpu_scan_max_results.setRange(1, 4096)
+        self.cpu_scan_max_results.setValue(8)
+
+        self.cpu_scan_threads = QSpinBox()
+        self.cpu_scan_threads.setRange(0, 4096)
+        self.cpu_scan_threads.setValue(0)
+
+        self.btn_cpu_scan = QPushButton("Run CPU scan")
+        self.btn_cpu_scan.clicked.connect(self._do_cpu_scan)
+
+        fl3.addRow("seed_hex", self.cpu_seed_hex)
+        fl3.addRow("blob_hex", self.cpu_scan_blob_hex)
+        fl3.addRow("nonce_offset", self.cpu_scan_nonce_offset)
+        fl3.addRow("start_nonce", self.cpu_scan_start_nonce)
+        fl3.addRow("iters", self.cpu_scan_iters)
+        fl3.addRow("target64", self.cpu_scan_target64)
+        fl3.addRow("max_results", self.cpu_scan_max_results)
+        fl3.addRow("threads (0=auto)", self.cpu_scan_threads)
+        fl3.addRow(self.btn_cpu_scan)
+
+        gb4 = QGroupBox("POST /v1/cpu/bench")
+        fl4 = QFormLayout(gb4)
+
+        self.cpu_bench_use_default_blob = QCheckBox("Use default synthetic blob")
+        self.cpu_bench_use_default_blob.setChecked(True)
+
+        self.cpu_bench_blob_hex = QPlainTextEdit()
+        self.cpu_bench_blob_hex.setFont(self.mono)
+
+        self.cpu_bench_nonce_offset = QSpinBox()
+        self.cpu_bench_nonce_offset.setRange(0, 65535)
+        self.cpu_bench_nonce_offset.setValue(39)
+
+        self.cpu_bench_start_nonce = QSpinBox()
+        self.cpu_bench_start_nonce.setRange(0, 2_147_483_647)
+        self.cpu_bench_start_nonce.setValue(0)
+
+        self.cpu_bench_iters = QSpinBox()
+        self.cpu_bench_iters.setRange(1, 100_000_000)
+        self.cpu_bench_iters.setValue(200_000)
+
+        self.cpu_bench_loops = QSpinBox()
+        self.cpu_bench_loops.setRange(1, 100_000)
+        self.cpu_bench_loops.setValue(8)
+
+        self.cpu_bench_threads = QSpinBox()
+        self.cpu_bench_threads.setRange(0, 4096)
+        self.cpu_bench_threads.setValue(0)
+
+        self.btn_cpu_bench = QPushButton("Run CPU bench")
+        self.btn_cpu_bench.clicked.connect(self._do_cpu_bench)
+
+        fl4.addRow("seed_hex", self.cpu_seed_hex)
+        fl4.addRow(self.cpu_bench_use_default_blob)
+        fl4.addRow("blob_hex", self.cpu_bench_blob_hex)
+        fl4.addRow("nonce_offset", self.cpu_bench_nonce_offset)
+        fl4.addRow("start_nonce", self.cpu_bench_start_nonce)
+        fl4.addRow("iters", self.cpu_bench_iters)
+        fl4.addRow("loops", self.cpu_bench_loops)
+        fl4.addRow("threads (0=auto)", self.cpu_bench_threads)
+        fl4.addRow(self.btn_cpu_bench)
+
+        lay.addWidget(gb0)
+        lay.addWidget(gb1)
+        lay.addWidget(gb2)
+        lay.addWidget(gb3)
+        lay.addWidget(gb4)
+
+        self.cpu_out = self._mk_api_out()
+        lay.addWidget(self.cpu_out, 1)
         return tab
 
     def _tab_gpu(self) -> QWidget:
@@ -2743,6 +2969,30 @@ bn_setPreset(window.__bn_preset);
                 if hdrs:
                     args += ["--api-python-headers-json", hdrs]
 
+            # ---------------- CPU CLI wiring ----------------
+            if self.cb_api_cpu.isChecked():
+                args += ["--api-cpu", "on"]
+
+                cpu_dll = self.ed_cpu_dll.text().strip()
+                if cpu_dll:
+                    args += ["--api-cpu-dll", cpu_dll]
+
+                if int(self.sp_cpu_hash_threads.value()) > 0:
+                    args += ["--api-cpu-hash-threads", str(int(self.sp_cpu_hash_threads.value()))]
+
+                if int(self.sp_cpu_scan_threads.value()) > 0:
+                    args += ["--api-cpu-scan-threads", str(int(self.sp_cpu_scan_threads.value()))]
+
+                args += ["--api-cpu-scan-min-iters-per-thread", str(int(self.sp_cpu_scan_min_iters.value()))]
+                args += ["--api-cpu-max-input-bytes", str(int(self.sp_cpu_max_input_kb.value()) * 1024)]
+                args += ["--api-cpu-max-batch-items", str(int(self.sp_cpu_max_batch_items.value()))]
+                args += ["--api-cpu-max-batch-total-bytes", str(int(self.sp_cpu_max_batch_total_kb.value()) * 1024)]
+                args += ["--api-cpu-max-scan-iters", str(int(self.sp_cpu_max_scan_iters.value()))]
+                args += ["--api-cpu-max-scan-results", str(int(self.sp_cpu_max_scan_results.value()))]
+                args += ["--api-cpu-default-nonce-offset", str(int(self.sp_cpu_nonce_offset_cfg.value()))]
+                args += ["--api-cpu-default-bench-iters", str(int(self.sp_cpu_bench_iters_cfg.value()))]
+                args += ["--api-cpu-default-bench-loops", str(int(self.sp_cpu_bench_loops_cfg.value()))]
+
             if self.cb_api_gpu.isChecked():
                 args += ["--api-gpu", "on"]
                 args += ["--api-gpu-local-only", "on" if self.cb_gpu_local_only.isChecked() else "off"]
@@ -2757,13 +3007,21 @@ bn_setPreset(window.__bn_preset);
                 if kernel_path:
                     args += ["--api-gpu-kernel-path", kernel_path]
 
-                scan_entry = self.ed_gpu_scan_entry.text().strip()
-                if scan_entry:
-                    args += ["--api-gpu-kernel-scan-entry", scan_entry]
+                scan_base_entry = self.ed_gpu_scan_base_entry.text().strip()
+                if scan_base_entry:
+                    args += ["--api-gpu-kernel-scan-base-entry", scan_base_entry]
 
-                hash_batch_entry = self.ed_gpu_hash_batch_entry.text().strip()
-                if hash_batch_entry:
-                    args += ["--api-gpu-kernel-hash-batch-entry", hash_batch_entry]
+                scan_ext_entry = self.ed_gpu_scan_ext_entry.text().strip()
+                if scan_ext_entry:
+                    args += ["--api-gpu-kernel-scan-ext-entry", scan_ext_entry]
+
+                hash_batch_base_entry = self.ed_gpu_hash_batch_base_entry.text().strip()
+                if hash_batch_base_entry:
+                    args += ["--api-gpu-kernel-hash-batch-base-entry", hash_batch_base_entry]
+
+                hash_batch_ext_entry = self.ed_gpu_hash_batch_ext_entry.text().strip()
+                if hash_batch_ext_entry:
+                    args += ["--api-gpu-kernel-hash-batch-ext-entry", hash_batch_ext_entry]
 
                 bench_entry = self.ed_gpu_bench_entry.text().strip()
                 if bench_entry:
@@ -3124,6 +3382,126 @@ bn_setPreset(window.__bn_preset);
         except Exception as e:
             self._append_plain(self.rx_out, f"randomx hash_batch error: {e}")
 
+    # ---------------- CPU actions ----------------
+
+    def _do_cpu_status(self) -> None:
+        try:
+            j = self._http_json("GET", "/cpu/status", None, prefix=self._api_prefix())
+            self.cpu_out.setPlainText("")
+            self._append_json(self.cpu_out, j)
+            self._append_json(self.txt_out, j)
+        except Exception as e:
+            self._append_plain(self.cpu_out, f"cpu status error: {e}")
+
+    def _do_cpu_hash(self) -> None:
+        try:
+            seed_hex = self.cpu_seed_hex.text().strip()
+            if not seed_hex:
+                raise ValueError("seed_hex required")
+            mode = self.cpu_data_mode.currentText().strip()
+            data = self.cpu_data.toPlainText().strip()
+            if not data:
+                raise ValueError("data required")
+
+            body: Dict[str, Any] = {"seed_hex": seed_hex}
+            body[mode] = data
+
+            j = self._http_json("POST", "/cpu/hash", body, prefix=self._api_prefix())
+            self.cpu_out.setPlainText("")
+            self._append_json(self.cpu_out, j)
+        except Exception as e:
+            self._append_plain(self.cpu_out, f"cpu hash error: {e}")
+
+    def _do_cpu_hash_batch(self) -> None:
+        try:
+            seed_hex = self.cpu_seed_hex.text().strip()
+            if not seed_hex:
+                raise ValueError("seed_hex required")
+
+            raw = self.cpu_batch_items.toPlainText().strip()
+            if not raw:
+                raise ValueError("items JSON required")
+
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                body: Dict[str, Any] = {
+                    "seed_hex": seed_hex,
+                    "items": parsed,
+                }
+            elif isinstance(parsed, dict):
+                body = dict(parsed)
+                body.setdefault("seed_hex", seed_hex)
+                if "items" not in body or not isinstance(body["items"], list):
+                    raise ValueError("body must include items[]")
+            else:
+                raise ValueError("JSON must be an array or object")
+
+            if int(self.cpu_batch_threads.value()) > 0:
+                body["threads"] = int(self.cpu_batch_threads.value())
+
+            j = self._http_json("POST", "/cpu/hash_batch", body, prefix=self._api_prefix())
+            self.cpu_out.setPlainText("")
+            self._append_json(self.cpu_out, j)
+        except Exception as e:
+            self._append_plain(self.cpu_out, f"cpu hash_batch error: {e}")
+
+    def _do_cpu_scan(self) -> None:
+        try:
+            seed_hex = self.cpu_seed_hex.text().strip()
+            blob_hex = self.cpu_scan_blob_hex.toPlainText().strip()
+            if not seed_hex:
+                raise ValueError("seed_hex required")
+            if not blob_hex:
+                raise ValueError("blob_hex required")
+
+            body: Dict[str, Any] = {
+                "seed_hex": seed_hex,
+                "blob_hex": blob_hex,
+                "nonce_offset": int(self.cpu_scan_nonce_offset.value()),
+                "start_nonce": int(self.cpu_scan_start_nonce.value()),
+                "iters": int(self.cpu_scan_iters.value()),
+                "target64": int(self.cpu_scan_target64.text().strip(), 0),
+                "max_results": int(self.cpu_scan_max_results.value()),
+            }
+
+            if int(self.cpu_scan_threads.value()) > 0:
+                body["threads"] = int(self.cpu_scan_threads.value())
+
+            j = self._http_json("POST", "/cpu/scan", body, prefix=self._api_prefix())
+            self.cpu_out.setPlainText("")
+            self._append_json(self.cpu_out, j)
+        except Exception as e:
+            self._append_plain(self.cpu_out, f"cpu scan error: {e}")
+
+    def _do_cpu_bench(self) -> None:
+        try:
+            seed_hex = self.cpu_seed_hex.text().strip()
+            if not seed_hex:
+                raise ValueError("seed_hex required")
+
+            body: Dict[str, Any] = {
+                "seed_hex": seed_hex,
+                "nonce_offset": int(self.cpu_bench_nonce_offset.value()),
+                "start_nonce": int(self.cpu_bench_start_nonce.value()),
+                "iters": int(self.cpu_bench_iters.value()),
+                "loops": int(self.cpu_bench_loops.value()),
+            }
+
+            if not self.cpu_bench_use_default_blob.isChecked():
+                blob_hex = self.cpu_bench_blob_hex.toPlainText().strip()
+                if not blob_hex:
+                    raise ValueError("blob_hex required when default synthetic blob is disabled")
+                body["blob_hex"] = blob_hex
+
+            if int(self.cpu_bench_threads.value()) > 0:
+                body["threads"] = int(self.cpu_bench_threads.value())
+
+            j = self._http_json("POST", "/cpu/bench", body, prefix=self._api_prefix())
+            self.cpu_out.setPlainText("")
+            self._append_json(self.cpu_out, j)
+        except Exception as e:
+            self._append_plain(self.cpu_out, f"cpu bench error: {e}")
+
     def _do_gpu_status(self) -> None:
         try:
             j = self._http_json("GET", "/gpu/status", None, prefix=self._api_prefix())
@@ -3158,9 +3536,18 @@ bn_setPreset(window.__bn_preset);
             body = {
                 "path": self.ed_gpu_kernel_path.text().strip(),
                 "build_options": self.ed_gpu_build_options.text().strip(),
-                "scan_entry": self.ed_gpu_scan_entry.text().strip(),
-                "hash_batch_entry": self.ed_gpu_hash_batch_entry.text().strip(),
+
+                "scan_base_entry": self.ed_gpu_scan_base_entry.text().strip(),
+                "scan_ext_entry": self.ed_gpu_scan_ext_entry.text().strip(),
+
+                "hash_batch_base_entry": self.ed_gpu_hash_batch_base_entry.text().strip(),
+                "hash_batch_ext_entry": self.ed_gpu_hash_batch_ext_entry.text().strip(),
+
                 "bench_entry": self.ed_gpu_bench_entry.text().strip(),
+
+                # optional compatibility mirror for older handlers
+                "scan_entry": self.ed_gpu_scan_base_entry.text().strip(),
+                "hash_batch_entry": self.ed_gpu_hash_batch_base_entry.text().strip(),
             }
             j = self._http_json("POST", "/gpu/build", body, prefix=self._api_prefix())
             self.gpu_out.setPlainText("")
@@ -3879,8 +4266,13 @@ bn_setPreset(window.__bn_preset);
             self.ed_python_spool_dir, self.ed_python_exe, self.ed_python_bridge_host,
             self.ed_python_blocknet_url, self.ed_python_blocknet_prefix, self.ed_python_headers_json,
 
+            # CPU config
+            self.ed_cpu_dll,
+
+            # GPU config
             self.ed_gpu_opencl_loader, self.ed_gpu_kernel_path,
-            self.ed_gpu_scan_entry, self.ed_gpu_hash_batch_entry,
+            self.ed_gpu_scan_base_entry, self.ed_gpu_scan_ext_entry,
+            self.ed_gpu_hash_batch_base_entry, self.ed_gpu_hash_batch_ext_entry,
             self.ed_gpu_bench_entry, self.ed_gpu_build_options,
 
             self.webw_base, self.webw_miner_url, self.webw_rx_url, self.webw_hash_url, self.webw_rx_wasm_url,
@@ -3898,12 +4290,29 @@ bn_setPreset(window.__bn_preset);
             self.sp_audio_scan_expand_pages, self.sp_audio_scan_max_links,
             self.sp_python_bridge_port,
             self.p2_open_threads,
+
+            # CPU config
+            self.sp_cpu_hash_threads, self.sp_cpu_scan_threads,
+            self.sp_cpu_scan_min_iters, self.sp_cpu_max_input_kb,
+            self.sp_cpu_max_batch_items, self.sp_cpu_max_batch_total_kb,
+            self.sp_cpu_max_scan_iters, self.sp_cpu_max_scan_results,
+            self.sp_cpu_nonce_offset_cfg, self.sp_cpu_bench_iters_cfg, self.sp_cpu_bench_loops_cfg,
+
+            # CPU UI fields
+            self.cpu_batch_threads,
+            self.cpu_scan_nonce_offset, self.cpu_scan_start_nonce, self.cpu_scan_iters,
+            self.cpu_scan_max_results, self.cpu_scan_threads,
+            self.cpu_bench_nonce_offset, self.cpu_bench_start_nonce, self.cpu_bench_iters,
+            self.cpu_bench_loops, self.cpu_bench_threads,
+
+            # GPU config/ui
             self.sp_gpu_max_kernel_kb, self.sp_gpu_max_blob_bytes, self.sp_gpu_max_seed_bytes,
             self.sp_gpu_max_results, self.sp_gpu_default_iters, self.sp_gpu_local_work_size,
             self.gpu_platform_index, self.gpu_device_index,
             self.gpu_nonce_offset, self.gpu_start_nonce, self.gpu_scan_iters,
             self.gpu_max_results, self.gpu_hash_batch_iters,
             self.gpu_bench_iters, self.gpu_bench_loops,
+
             self.webw_miner_count, self.webw_scan_iters, self.webw_scan_max_results,
             self.webw_scan_threads, self.webw_poll_max_msgs, self.webw_sleep_ms,
             self.webw_rx_count, self.webw_rx_hash_ms, self.webw_rx_batch_ms,
@@ -3916,10 +4325,12 @@ bn_setPreset(window.__bn_preset);
             self.cb_api, self.cb_api_media, self.cb_api_randomx, self.cb_api_web,
             self.cb_api_p2pool, self.cb_api_webworker, self.cb_api_process,
             self.cb_api_network, self.cb_network_set_ipv4, self.cb_api_audio, self.cb_api_python,
+            self.cb_api_cpu,
             self.cb_api_gpu, self.cb_gpu_local_only, self.cb_gpu_auto_select, self.cb_gpu_auto_build,
             self.cb_web_block_private, self.cb_web_allow_http, self.cb_web_allow_https,
             self.cb_audio_persist, self.cb_audio_use_proxy, self.cb_audio_block_private,
             self.cb_python_serve, self.cb_python_control, self.cb_python_control_local,
+            self.cpu_bench_use_default_blob,
             self.webw_send_auth, self.webw_poll_first,
         ):
             cb.stateChanged.connect(self._schedule_save)
@@ -3931,6 +4342,13 @@ bn_setPreset(window.__bn_preset);
         self.p2_open_wallet.textChanged.connect(self._schedule_save)
         self.p2_open_rig.textChanged.connect(self._schedule_save)
         self.p2_open_extra_json.textChanged.connect(self._schedule_save)
+
+        self.cpu_seed_hex.textChanged.connect(self._schedule_save)
+        self.cpu_data.textChanged.connect(self._schedule_save)
+        self.cpu_batch_items.textChanged.connect(self._schedule_save)
+        self.cpu_scan_blob_hex.textChanged.connect(self._schedule_save)
+        self.cpu_scan_target64.textChanged.connect(self._schedule_save)
+        self.cpu_bench_blob_hex.textChanged.connect(self._schedule_save)
 
         self.gpu_seed_hex.textChanged.connect(self._schedule_save)
         self.gpu_blob_hex.textChanged.connect(self._schedule_save)
@@ -3987,6 +4405,7 @@ bn_setPreset(window.__bn_preset);
             self.cb_api_network.setChecked(bool(j.get("api_network", True)))
             self.cb_api_audio.setChecked(bool(j.get("api_audio", False)))
             self.cb_api_python.setChecked(bool(j.get("api_python", False)))
+            self.cb_api_cpu.setChecked(bool(j.get("api_cpu", False)))
 
             self.ed_randomx_dll.setText(j.get("randomx_dll", self.ed_randomx_dll.text()))
             self.ed_p2pool_extra.setText(j.get("p2pool_extra", self.ed_p2pool_extra.text()))
@@ -4026,6 +4445,43 @@ bn_setPreset(window.__bn_preset);
             self.ed_python_blocknet_prefix.setText(j.get("python_blocknet_prefix", self.ed_python_blocknet_prefix.text()))
             self.ed_python_headers_json.setText(j.get("python_headers_json", self.ed_python_headers_json.text()))
 
+            # CPU load
+            self.ed_cpu_dll.setText(j.get("cpu_dll", self.ed_cpu_dll.text()))
+            self.sp_cpu_hash_threads.setValue(int(j.get("cpu_hash_threads", self.sp_cpu_hash_threads.value())))
+            self.sp_cpu_scan_threads.setValue(int(j.get("cpu_scan_threads", self.sp_cpu_scan_threads.value())))
+            self.sp_cpu_scan_min_iters.setValue(int(j.get("cpu_scan_min_iters", self.sp_cpu_scan_min_iters.value())))
+            self.sp_cpu_max_input_kb.setValue(int(j.get("cpu_max_input_kb", self.sp_cpu_max_input_kb.value())))
+            self.sp_cpu_max_batch_items.setValue(int(j.get("cpu_max_batch_items", self.sp_cpu_max_batch_items.value())))
+            self.sp_cpu_max_batch_total_kb.setValue(int(j.get("cpu_max_batch_total_kb", self.sp_cpu_max_batch_total_kb.value())))
+            self.sp_cpu_max_scan_iters.setValue(int(j.get("cpu_max_scan_iters", self.sp_cpu_max_scan_iters.value())))
+            self.sp_cpu_max_scan_results.setValue(int(j.get("cpu_max_scan_results", self.sp_cpu_max_scan_results.value())))
+            self.sp_cpu_nonce_offset_cfg.setValue(int(j.get("cpu_nonce_offset_cfg", self.sp_cpu_nonce_offset_cfg.value())))
+            self.sp_cpu_bench_iters_cfg.setValue(int(j.get("cpu_bench_iters_cfg", self.sp_cpu_bench_iters_cfg.value())))
+            self.sp_cpu_bench_loops_cfg.setValue(int(j.get("cpu_bench_loops_cfg", self.sp_cpu_bench_loops_cfg.value())))
+
+            self.cpu_seed_hex.setText(j.get("cpu_seed_hex", self.cpu_seed_hex.text()))
+            self.cpu_data.setPlainText(j.get("cpu_data", self.cpu_data.toPlainText()))
+            try:
+                self.cpu_data_mode.setCurrentText(j.get("cpu_data_mode", self.cpu_data_mode.currentText()))
+            except Exception:
+                pass
+            self.cpu_batch_threads.setValue(int(j.get("cpu_batch_threads", self.cpu_batch_threads.value())))
+            self.cpu_batch_items.setPlainText(j.get("cpu_batch_items", self.cpu_batch_items.toPlainText()))
+            self.cpu_scan_blob_hex.setPlainText(j.get("cpu_scan_blob_hex", self.cpu_scan_blob_hex.toPlainText()))
+            self.cpu_scan_nonce_offset.setValue(int(j.get("cpu_scan_nonce_offset", self.cpu_scan_nonce_offset.value())))
+            self.cpu_scan_start_nonce.setValue(int(j.get("cpu_scan_start_nonce", self.cpu_scan_start_nonce.value())))
+            self.cpu_scan_iters.setValue(int(j.get("cpu_scan_iters_ui", self.cpu_scan_iters.value())))
+            self.cpu_scan_target64.setText(j.get("cpu_scan_target64", self.cpu_scan_target64.text()))
+            self.cpu_scan_max_results.setValue(int(j.get("cpu_scan_max_results_ui", self.cpu_scan_max_results.value())))
+            self.cpu_scan_threads.setValue(int(j.get("cpu_scan_threads_ui", self.cpu_scan_threads.value())))
+            self.cpu_bench_use_default_blob.setChecked(bool(j.get("cpu_bench_use_default_blob", self.cpu_bench_use_default_blob.isChecked())))
+            self.cpu_bench_blob_hex.setPlainText(j.get("cpu_bench_blob_hex", self.cpu_bench_blob_hex.toPlainText()))
+            self.cpu_bench_nonce_offset.setValue(int(j.get("cpu_bench_nonce_offset", self.cpu_bench_nonce_offset.value())))
+            self.cpu_bench_start_nonce.setValue(int(j.get("cpu_bench_start_nonce", self.cpu_bench_start_nonce.value())))
+            self.cpu_bench_iters.setValue(int(j.get("cpu_bench_iters", self.cpu_bench_iters.value())))
+            self.cpu_bench_loops.setValue(int(j.get("cpu_bench_loops", self.cpu_bench_loops.value())))
+            self.cpu_bench_threads.setValue(int(j.get("cpu_bench_threads", self.cpu_bench_threads.value())))
+
             self.cb_api_gpu.setChecked(bool(j.get("api_gpu", False)))
             self.cb_gpu_local_only.setChecked(bool(j.get("gpu_local_only", True)))
             self.cb_gpu_auto_select.setChecked(bool(j.get("gpu_auto_select", True)))
@@ -4033,8 +4489,24 @@ bn_setPreset(window.__bn_preset);
 
             self.ed_gpu_opencl_loader.setText(j.get("gpu_opencl_loader", self.ed_gpu_opencl_loader.text()))
             self.ed_gpu_kernel_path.setText(j.get("gpu_kernel_path", self.ed_gpu_kernel_path.text()))
-            self.ed_gpu_scan_entry.setText(j.get("gpu_scan_entry", self.ed_gpu_scan_entry.text()))
-            self.ed_gpu_hash_batch_entry.setText(j.get("gpu_hash_batch_entry", self.ed_gpu_hash_batch_entry.text()))
+
+            legacy_scan = j.get("gpu_scan_entry", "blocknet_randomx_vm_scan")
+            legacy_hash_batch = j.get("gpu_hash_batch_entry", "blocknet_randomx_vm_hash_batch")
+
+            self.ed_gpu_scan_base_entry.setText(
+                j.get("gpu_scan_base_entry", legacy_scan or "blocknet_randomx_vm_scan")
+            )
+            self.ed_gpu_scan_ext_entry.setText(
+                j.get("gpu_scan_ext_entry", "blocknet_randomx_vm_scan_ext")
+            )
+
+            self.ed_gpu_hash_batch_base_entry.setText(
+                j.get("gpu_hash_batch_base_entry", legacy_hash_batch or "blocknet_randomx_vm_hash_batch")
+            )
+            self.ed_gpu_hash_batch_ext_entry.setText(
+                j.get("gpu_hash_batch_ext_entry", "blocknet_randomx_vm_hash_batch_ext")
+            )
+
             self.ed_gpu_bench_entry.setText(j.get("gpu_bench_entry", self.ed_gpu_bench_entry.text()))
             self.ed_gpu_build_options.setText(j.get("gpu_build_options", self.ed_gpu_build_options.text()))
 
@@ -4147,6 +4619,7 @@ bn_setPreset(window.__bn_preset);
                 "api_network": bool(self.cb_api_network.isChecked()),
                 "api_audio": bool(self.cb_api_audio.isChecked()),
                 "api_python": bool(self.cb_api_python.isChecked()),
+                "api_cpu": bool(self.cb_api_cpu.isChecked()),
                 "api_gpu": bool(self.cb_api_gpu.isChecked()),
 
                 "randomx_dll": self.ed_randomx_dll.text().strip(),
@@ -4188,16 +4661,59 @@ bn_setPreset(window.__bn_preset);
                 "python_blocknet_prefix": self.ed_python_blocknet_prefix.text().strip(),
                 "python_headers_json": self.ed_python_headers_json.text().strip(),
 
+                # CPU config persisted
+                "cpu_dll": self.ed_cpu_dll.text().strip(),
+                "cpu_hash_threads": int(self.sp_cpu_hash_threads.value()),
+                "cpu_scan_threads": int(self.sp_cpu_scan_threads.value()),
+                "cpu_scan_min_iters": int(self.sp_cpu_scan_min_iters.value()),
+                "cpu_max_input_kb": int(self.sp_cpu_max_input_kb.value()),
+                "cpu_max_batch_items": int(self.sp_cpu_max_batch_items.value()),
+                "cpu_max_batch_total_kb": int(self.sp_cpu_max_batch_total_kb.value()),
+                "cpu_max_scan_iters": int(self.sp_cpu_max_scan_iters.value()),
+                "cpu_max_scan_results": int(self.sp_cpu_max_scan_results.value()),
+                "cpu_nonce_offset_cfg": int(self.sp_cpu_nonce_offset_cfg.value()),
+                "cpu_bench_iters_cfg": int(self.sp_cpu_bench_iters_cfg.value()),
+                "cpu_bench_loops_cfg": int(self.sp_cpu_bench_loops_cfg.value()),
+
+                "cpu_seed_hex": self.cpu_seed_hex.text().strip(),
+                "cpu_data_mode": self.cpu_data_mode.currentText().strip(),
+                "cpu_data": self.cpu_data.toPlainText(),
+                "cpu_batch_threads": int(self.cpu_batch_threads.value()),
+                "cpu_batch_items": self.cpu_batch_items.toPlainText(),
+                "cpu_scan_blob_hex": self.cpu_scan_blob_hex.toPlainText(),
+                "cpu_scan_nonce_offset": int(self.cpu_scan_nonce_offset.value()),
+                "cpu_scan_start_nonce": int(self.cpu_scan_start_nonce.value()),
+                "cpu_scan_iters_ui": int(self.cpu_scan_iters.value()),
+                "cpu_scan_target64": self.cpu_scan_target64.text().strip(),
+                "cpu_scan_max_results_ui": int(self.cpu_scan_max_results.value()),
+                "cpu_scan_threads_ui": int(self.cpu_scan_threads.value()),
+                "cpu_bench_use_default_blob": bool(self.cpu_bench_use_default_blob.isChecked()),
+                "cpu_bench_blob_hex": self.cpu_bench_blob_hex.toPlainText(),
+                "cpu_bench_nonce_offset": int(self.cpu_bench_nonce_offset.value()),
+                "cpu_bench_start_nonce": int(self.cpu_bench_start_nonce.value()),
+                "cpu_bench_iters": int(self.cpu_bench_iters.value()),
+                "cpu_bench_loops": int(self.cpu_bench_loops.value()),
+                "cpu_bench_threads": int(self.cpu_bench_threads.value()),
+
                 "gpu_local_only": bool(self.cb_gpu_local_only.isChecked()),
                 "gpu_auto_select": bool(self.cb_gpu_auto_select.isChecked()),
                 "gpu_auto_build": bool(self.cb_gpu_auto_build.isChecked()),
 
                 "gpu_opencl_loader": self.ed_gpu_opencl_loader.text().strip(),
                 "gpu_kernel_path": self.ed_gpu_kernel_path.text().strip(),
-                "gpu_scan_entry": self.ed_gpu_scan_entry.text().strip(),
-                "gpu_hash_batch_entry": self.ed_gpu_hash_batch_entry.text().strip(),
+
+                "gpu_scan_base_entry": self.ed_gpu_scan_base_entry.text().strip(),
+                "gpu_scan_ext_entry": self.ed_gpu_scan_ext_entry.text().strip(),
+
+                "gpu_hash_batch_base_entry": self.ed_gpu_hash_batch_base_entry.text().strip(),
+                "gpu_hash_batch_ext_entry": self.ed_gpu_hash_batch_ext_entry.text().strip(),
+
                 "gpu_bench_entry": self.ed_gpu_bench_entry.text().strip(),
                 "gpu_build_options": self.ed_gpu_build_options.text().strip(),
+
+                # optional legacy mirrors
+                "gpu_scan_entry": self.ed_gpu_scan_base_entry.text().strip(),
+                "gpu_hash_batch_entry": self.ed_gpu_hash_batch_base_entry.text().strip(),
 
                 "gpu_max_kernel_kb": int(self.sp_gpu_max_kernel_kb.value()),
                 "gpu_max_blob_bytes": int(self.sp_gpu_max_blob_bytes.value()),
