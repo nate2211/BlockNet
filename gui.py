@@ -464,7 +464,10 @@ class MainWindow(QMainWindow):
         self.btn_audio_ui = QPushButton("Open Audio UI")
         self.btn_python_status_quick = QPushButton("API: Python bridge status")
         self.btn_python_ui_quick = QPushButton("Open Python Bridge Admin UI")
+        self.btn_monero_rpc_current_quick = QPushButton("API: Monero RPC current job")
+        self.btn_monero_rpc_debug_quick = QPushButton("API: Monero RPC debug")
         self.btn_web_test = QPushButton("API: Web fetch (example.com)")
+
         l2.addWidget(self.btn_api_ping)
         l2.addWidget(self.btn_rx_status)
         l2.addWidget(self.btn_cpu_status_quick)
@@ -474,6 +477,8 @@ class MainWindow(QMainWindow):
         l2.addWidget(self.btn_audio_ui)
         l2.addWidget(self.btn_python_status_quick)
         l2.addWidget(self.btn_python_ui_quick)
+        l2.addWidget(self.btn_monero_rpc_current_quick)
+        l2.addWidget(self.btn_monero_rpc_debug_quick)
         l2.addWidget(self.btn_web_test)
         lay.addWidget(gb2)
 
@@ -486,6 +491,8 @@ class MainWindow(QMainWindow):
         self.btn_audio_ui.clicked.connect(self._do_audio_open_ui)
         self.btn_python_status_quick.clicked.connect(self._do_python_status)
         self.btn_python_ui_quick.clicked.connect(self._do_python_open_admin_ui_external)
+        self.btn_monero_rpc_current_quick.clicked.connect(self._do_monero_rpc_current)
+        self.btn_monero_rpc_debug_quick.clicked.connect(self._do_monero_rpc_debug)
         self.btn_web_test.clicked.connect(self._do_web_example)
 
         lay.addStretch(1)
@@ -631,6 +638,19 @@ class MainWindow(QMainWindow):
         self.ed_p2pool_extra = QLineEdit("")
         self.ed_p2pool_extra.setPlaceholderText("extra p2pool args")
 
+        self.cb_api_monero_rpc = QCheckBox("Enable Monero RPC API (--api-monero-rpc on)")
+        self.cb_api_monero_rpc.setChecked(False)
+
+        self.ed_monero_rpc_dll = QLineEdit(r".\randomx-dll.dll")
+        self.btn_monero_rpc_dll = QPushButton("Browse…")
+
+        self.sp_monero_rpc_verifier_threads = QSpinBox()
+        self.sp_monero_rpc_verifier_threads.setRange(0, 4096)
+        self.sp_monero_rpc_verifier_threads.setValue(0)
+
+        self.ed_monero_rpc_extra = QLineEdit("")
+        self.ed_monero_rpc_extra.setPlaceholderText("extra monero-rpc args")
+
         self.cb_api_webworker = QCheckBox("Enable WebWorker API (--api-webworker on)")
         self.cb_api_webworker.setChecked(False)
 
@@ -664,6 +684,10 @@ class MainWindow(QMainWindow):
         fl.addRow(self.cb_api_web)
         fl.addRow(self.cb_api_p2pool)
         fl.addRow("P2Pool extra", self.ed_p2pool_extra)
+        fl.addRow(self.cb_api_monero_rpc)
+        fl.addRow("Monero RPC DLL", _hbox(self.ed_monero_rpc_dll, self.btn_monero_rpc_dll))
+        fl.addRow("Monero verifier threads (0=auto)", self.sp_monero_rpc_verifier_threads)
+        fl.addRow("Monero RPC extra", self.ed_monero_rpc_extra)
         fl.addRow(self.cb_api_webworker)
         fl.addRow(self.cb_api_process)
         fl.addRow(self.cb_api_network)
@@ -676,6 +700,7 @@ class MainWindow(QMainWindow):
         fl.addRow(self.cb_api_cpu)
 
         self.btn_randomx_dll.clicked.connect(lambda: self._browse_file_into(self.ed_randomx_dll))
+        self.btn_monero_rpc_dll.clicked.connect(lambda: self._browse_file_into(self.ed_monero_rpc_dll))
         self.btn_network_wintun_dll.clicked.connect(lambda: self._browse_file_into(self.ed_network_wintun_dll))
 
         lay.addWidget(gb)
@@ -812,7 +837,6 @@ class MainWindow(QMainWindow):
 
         lay.addWidget(gbp)
 
-        # ---------------- CPU API / RandomX CPU backend ----------------
         gbc = QGroupBox("CPU API / RandomX CPU backend")
         cfl = QFormLayout(gbc)
 
@@ -900,7 +924,6 @@ class MainWindow(QMainWindow):
         self.ed_gpu_kernel_path = QLineEdit("blocknet_randomx_vm_opencl.cl")
         self.btn_gpu_kernel_path = QPushButton("Browse…")
 
-        # ---- separate base/ext entry names ----
         self.ed_gpu_scan_base_entry = QLineEdit("blocknet_randomx_vm_scan")
         self.ed_gpu_scan_ext_entry = QLineEdit("blocknet_randomx_vm_scan_ext")
 
@@ -1035,6 +1058,7 @@ class MainWindow(QMainWindow):
         self.right_tabs.addTab(self._wrap_scroll(self._tab_cpu()), "API: CPU")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_gpu()), "API: GPU")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_p2pool()), "API: P2Pool")
+        self.right_tabs.addTab(self._wrap_scroll(self._tab_monero_rpc()), "API: Monero RPC")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_network()), "API: Network")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_audio()), "API: Audio")
         self.right_tabs.addTab(self._wrap_scroll(self._tab_python()), "API: Python")
@@ -1375,8 +1399,6 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.rx_out, 1)
         return tab
 
-    # ---------------- CPU tab ----------------
-
     def _tab_cpu(self) -> QWidget:
         tab = QWidget()
         lay = QVBoxLayout(tab)
@@ -1702,6 +1724,114 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.p2_out, 1)
         return tab
 
+    def _tab_monero_rpc(self) -> QWidget:
+        tab = QWidget()
+        lay = QVBoxLayout(tab)
+
+        gb0 = QGroupBox("Current job / broker state")
+        fl0 = QFormLayout(gb0)
+
+        row0 = QHBoxLayout()
+        self.btn_monero_rpc_current = QPushButton("Get current job")
+        self.btn_monero_rpc_feed_poll = QPushButton("Feed poll")
+        self.btn_monero_rpc_debug = QPushButton("Debug state")
+        row0.addWidget(self.btn_monero_rpc_current)
+        row0.addWidget(self.btn_monero_rpc_feed_poll)
+        row0.addWidget(self.btn_monero_rpc_debug)
+
+        self.monero_rpc_after_seq = QSpinBox()
+        self.monero_rpc_after_seq.setRange(0, 2_147_483_647)
+        self.monero_rpc_after_seq.setValue(0)
+
+        self.monero_rpc_timeout_ms = QSpinBox()
+        self.monero_rpc_timeout_ms.setRange(0, 60_000)
+        self.monero_rpc_timeout_ms.setValue(15_000)
+
+        self.btn_monero_rpc_current.clicked.connect(self._do_monero_rpc_current)
+        self.btn_monero_rpc_feed_poll.clicked.connect(self._do_monero_rpc_feed_poll)
+        self.btn_monero_rpc_debug.clicked.connect(self._do_monero_rpc_debug)
+
+        fl0.addRow("after_seq", self.monero_rpc_after_seq)
+        fl0.addRow("timeout_ms", self.monero_rpc_timeout_ms)
+        fl0.addRow(row0)
+
+        gb1 = QGroupBox("Push broker job")
+        fl1 = QFormLayout(gb1)
+
+        self.monero_rpc_job_push_json = QPlainTextEdit()
+        self.monero_rpc_job_push_json.setFont(self.mono)
+        self.monero_rpc_job_push_json.setPlainText(json.dumps({
+            "job_id": "job-1",
+            "blob": "",
+            "seed_hash": "",
+            "target": "",
+            "nonce_offset": 39,
+            "height": 0,
+            "algo": "rx/0",
+            "source": "gui"
+        }, indent=2))
+
+        self.btn_monero_rpc_push_job = QPushButton("Push job")
+        self.btn_monero_rpc_push_job.clicked.connect(self._do_monero_rpc_push_job)
+
+        fl1.addRow("payload", self.monero_rpc_job_push_json)
+        fl1.addRow(self.btn_monero_rpc_push_job)
+
+        gb2 = QGroupBox("Nonce lease manager")
+        fl2 = QFormLayout(gb2)
+
+        self.monero_rpc_miner_id = QLineEdit("miner-1")
+
+        self.monero_rpc_lease_count = QSpinBox()
+        self.monero_rpc_lease_count.setRange(1, 4 * 1024 * 1024)
+        self.monero_rpc_lease_count.setValue(65536)
+
+        self.monero_rpc_release_lease_id = QLineEdit("")
+
+        row2 = QHBoxLayout()
+        self.btn_monero_rpc_alloc_lease = QPushButton("Alloc lease")
+        self.btn_monero_rpc_release_lease = QPushButton("Release lease")
+        row2.addWidget(self.btn_monero_rpc_alloc_lease)
+        row2.addWidget(self.btn_monero_rpc_release_lease)
+
+        self.btn_monero_rpc_alloc_lease.clicked.connect(self._do_monero_rpc_alloc_lease)
+        self.btn_monero_rpc_release_lease.clicked.connect(self._do_monero_rpc_release_lease)
+
+        fl2.addRow("miner_id", self.monero_rpc_miner_id)
+        fl2.addRow("count", self.monero_rpc_lease_count)
+        fl2.addRow("lease_id", self.monero_rpc_release_lease_id)
+        fl2.addRow(row2)
+
+        gb3 = QGroupBox("Submit share for exact verification")
+        fl3 = QFormLayout(gb3)
+
+        self.monero_rpc_submit_miner_id = QLineEdit("miner-1")
+        self.monero_rpc_submit_job_id = QLineEdit("")
+        self.monero_rpc_submit_expected_job_seq = QSpinBox()
+        self.monero_rpc_submit_expected_job_seq.setRange(0, 2_147_483_647)
+        self.monero_rpc_submit_expected_job_seq.setValue(0)
+        self.monero_rpc_submit_nonce = QLineEdit("")
+        self.monero_rpc_submit_result = QLineEdit("")
+
+        self.btn_monero_rpc_submit_share = QPushButton("Submit share")
+        self.btn_monero_rpc_submit_share.clicked.connect(self._do_monero_rpc_submit_share)
+
+        fl3.addRow("miner_id", self.monero_rpc_submit_miner_id)
+        fl3.addRow("job_id", self.monero_rpc_submit_job_id)
+        fl3.addRow("expected_job_seq (0=omit)", self.monero_rpc_submit_expected_job_seq)
+        fl3.addRow("nonce", self.monero_rpc_submit_nonce)
+        fl3.addRow("result", self.monero_rpc_submit_result)
+        fl3.addRow(self.btn_monero_rpc_submit_share)
+
+        lay.addWidget(gb0)
+        lay.addWidget(gb1)
+        lay.addWidget(gb2)
+        lay.addWidget(gb3)
+
+        self.monero_rpc_out = self._mk_api_out()
+        lay.addWidget(self.monero_rpc_out, 1)
+        return tab
+
     def _tab_network(self) -> QWidget:
         tab = QWidget()
         lay = QVBoxLayout(tab)
@@ -1928,8 +2058,6 @@ class MainWindow(QMainWindow):
         else:
             self.python_view = None
         return tab
-
-    # ---------------- WebWorker harness ----------------
 
     def _webworker_harness_html(self) -> str:
         return r"""<!doctype html>
@@ -2895,6 +3023,21 @@ bn_setPreset(window.__bn_preset);
                 args += ["--api-p2pool", "on"]
                 args += self._split_extra_args(self.ed_p2pool_extra.text())
 
+            if self.cb_api_monero_rpc.isChecked():
+                args += ["--api-monero-rpc", "on"]
+
+                monero_rpc_dll = self.ed_monero_rpc_dll.text().strip()
+                if monero_rpc_dll:
+                    args += ["--api-monero-rpc-dll", monero_rpc_dll]
+
+                if int(self.sp_monero_rpc_verifier_threads.value()) > 0:
+                    args += [
+                        "--api-monero-rpc-verifier-threads",
+                        str(int(self.sp_monero_rpc_verifier_threads.value()))
+                    ]
+
+                args += self._split_extra_args(self.ed_monero_rpc_extra.text())
+
             if self.cb_api_webworker.isChecked():
                 args += ["--api-webworker", "on"]
 
@@ -2969,7 +3112,6 @@ bn_setPreset(window.__bn_preset);
                 if hdrs:
                     args += ["--api-python-headers-json", hdrs]
 
-            # ---------------- CPU CLI wiring ----------------
             if self.cb_api_cpu.isChecked():
                 args += ["--api-cpu", "on"]
 
@@ -3536,16 +3678,11 @@ bn_setPreset(window.__bn_preset);
             body = {
                 "path": self.ed_gpu_kernel_path.text().strip(),
                 "build_options": self.ed_gpu_build_options.text().strip(),
-
                 "scan_base_entry": self.ed_gpu_scan_base_entry.text().strip(),
                 "scan_ext_entry": self.ed_gpu_scan_ext_entry.text().strip(),
-
                 "hash_batch_base_entry": self.ed_gpu_hash_batch_base_entry.text().strip(),
                 "hash_batch_ext_entry": self.ed_gpu_hash_batch_ext_entry.text().strip(),
-
                 "bench_entry": self.ed_gpu_bench_entry.text().strip(),
-
-                # optional compatibility mirror for older handlers
                 "scan_entry": self.ed_gpu_scan_base_entry.text().strip(),
                 "hash_batch_entry": self.ed_gpu_hash_batch_base_entry.text().strip(),
             }
@@ -3739,6 +3876,144 @@ bn_setPreset(window.__bn_preset);
             self._append_json(self.p2_out, j)
         except Exception as e:
             self._append_plain(self.p2_out, f"p2pool close error: {e}")
+
+    # ---------------- Monero RPC actions ----------------
+
+    def _do_monero_rpc_current(self) -> None:
+        try:
+            j = self._http_json("GET", "/monero_rpc/job/current", None, prefix=self._api_prefix())
+            self.monero_rpc_out.setPlainText("")
+            self._append_json(self.monero_rpc_out, j)
+            self._append_json(self.txt_out, j)
+        except Exception as e:
+            self._append_plain(self.monero_rpc_out, f"monero rpc current error: {e}")
+
+    def _do_monero_rpc_feed_poll(self) -> None:
+        try:
+            body = {
+                "after_seq": int(self.monero_rpc_after_seq.value()),
+                "timeout_ms": int(self.monero_rpc_timeout_ms.value()),
+            }
+            j = self._http_json("POST", "/monero_rpc/feed/poll", body, prefix=self._api_prefix())
+            self.monero_rpc_out.setPlainText("")
+            self._append_json(self.monero_rpc_out, j)
+
+            try:
+                if isinstance(j, dict):
+                    if "feed_seq" in j:
+                        self.monero_rpc_after_seq.setValue(int(j.get("feed_seq", 0)))
+                    job = j.get("job") or {}
+                    if isinstance(job, dict):
+                        job_id = str(job.get("job_id") or "")
+                        if job_id:
+                            self.monero_rpc_submit_job_id.setText(job_id)
+            except Exception:
+                pass
+        except Exception as e:
+            self._append_plain(self.monero_rpc_out, f"monero rpc feed poll error: {e}")
+
+    def _do_monero_rpc_push_job(self) -> None:
+        try:
+            body = json.loads(self.monero_rpc_job_push_json.toPlainText().strip() or "{}")
+            if not isinstance(body, dict):
+                raise ValueError("job push payload must be an object")
+            j = self._http_json("POST", "/monero_rpc/job/push", body, prefix=self._api_prefix())
+            self.monero_rpc_out.setPlainText("")
+            self._append_json(self.monero_rpc_out, j)
+
+            try:
+                if isinstance(j, dict):
+                    if "feed_seq" in j:
+                        self.monero_rpc_after_seq.setValue(int(j.get("feed_seq", 0)))
+                    if "job_seq" in j:
+                        self.monero_rpc_submit_expected_job_seq.setValue(int(j.get("job_seq", 0)))
+                    job = j.get("job") or {}
+                    if isinstance(job, dict):
+                        job_id = str(job.get("job_id") or "")
+                        if job_id:
+                            self.monero_rpc_submit_job_id.setText(job_id)
+            except Exception:
+                pass
+        except Exception as e:
+            self._append_plain(self.monero_rpc_out, f"monero rpc push job error: {e}")
+
+    def _do_monero_rpc_alloc_lease(self) -> None:
+        try:
+            body = {
+                "miner_id": self.monero_rpc_miner_id.text().strip() or "miner-1",
+                "count": int(self.monero_rpc_lease_count.value()),
+            }
+            j = self._http_json("POST", "/monero_rpc/lease/alloc", body, prefix=self._api_prefix())
+            self.monero_rpc_out.setPlainText("")
+            self._append_json(self.monero_rpc_out, j)
+
+            try:
+                lease = j.get("lease") or {}
+                if isinstance(lease, dict):
+                    lease_id = str(lease.get("lease_id") or "")
+                    if lease_id:
+                        self.monero_rpc_release_lease_id.setText(lease_id)
+                job = j.get("job") or {}
+                if isinstance(job, dict):
+                    job_id = str(job.get("job_id") or "")
+                    if job_id:
+                        self.monero_rpc_submit_job_id.setText(job_id)
+                    if "job_seq" in job:
+                        self.monero_rpc_submit_expected_job_seq.setValue(int(job.get("job_seq", 0)))
+            except Exception:
+                pass
+        except Exception as e:
+            self._append_plain(self.monero_rpc_out, f"monero rpc alloc lease error: {e}")
+
+    def _do_monero_rpc_release_lease(self) -> None:
+        try:
+            lease_id = self.monero_rpc_release_lease_id.text().strip()
+            if not lease_id:
+                raise ValueError("lease_id required")
+            j = self._http_json(
+                "POST",
+                "/monero_rpc/lease/release",
+                {"lease_id": lease_id},
+                prefix=self._api_prefix(),
+            )
+            self.monero_rpc_out.setPlainText("")
+            self._append_json(self.monero_rpc_out, j)
+        except Exception as e:
+            self._append_plain(self.monero_rpc_out, f"monero rpc release lease error: {e}")
+
+    def _do_monero_rpc_submit_share(self) -> None:
+        try:
+            body: Dict[str, Any] = {
+                "miner_id": self.monero_rpc_submit_miner_id.text().strip() or "miner-1",
+                "job_id": self.monero_rpc_submit_job_id.text().strip(),
+                "nonce": self.monero_rpc_submit_nonce.text().strip(),
+                "result": self.monero_rpc_submit_result.text().strip(),
+            }
+            if not body["job_id"]:
+                raise ValueError("job_id required")
+            if not body["nonce"]:
+                raise ValueError("nonce required")
+            if not body["result"]:
+                raise ValueError("result required")
+
+            expected_job_seq = int(self.monero_rpc_submit_expected_job_seq.value())
+            if expected_job_seq > 0:
+                body["expected_job_seq"] = expected_job_seq
+
+            j = self._http_json("POST", "/monero_rpc/submit/share", body, prefix=self._api_prefix())
+            self.monero_rpc_out.setPlainText("")
+            self._append_json(self.monero_rpc_out, j)
+        except Exception as e:
+            self._append_plain(self.monero_rpc_out, f"monero rpc submit share error: {e}")
+
+    def _do_monero_rpc_debug(self) -> None:
+        try:
+            j = self._http_json("GET", "/monero_rpc/debug_state", None, prefix=self._api_prefix())
+            self.monero_rpc_out.setPlainText("")
+            self._append_json(self.monero_rpc_out, j)
+            self._append_json(self.txt_out, j)
+        except Exception as e:
+            self._append_plain(self.monero_rpc_out, f"monero rpc debug error: {e}")
 
     # ---------------- Audio helpers/actions ----------------
 
@@ -4259,6 +4534,7 @@ bn_setPreset(window.__bn_preset);
             self.ed_key, self.ed_mime, self.ed_put, self.ed_get,
 
             self.ed_api_prefix, self.ed_randomx_dll, self.ed_web_ua, self.ed_p2pool_extra,
+            self.ed_monero_rpc_dll, self.ed_monero_rpc_extra,
             self.ed_network_wintun_dll, self.ed_network_iface, self.ed_network_ipv4,
 
             self.ed_audio_spool_dir, self.ed_audio_searxng_url, self.ed_audio_proxy,
@@ -4266,10 +4542,8 @@ bn_setPreset(window.__bn_preset);
             self.ed_python_spool_dir, self.ed_python_exe, self.ed_python_bridge_host,
             self.ed_python_blocknet_url, self.ed_python_blocknet_prefix, self.ed_python_headers_json,
 
-            # CPU config
             self.ed_cpu_dll,
 
-            # GPU config
             self.ed_gpu_opencl_loader, self.ed_gpu_kernel_path,
             self.ed_gpu_scan_base_entry, self.ed_gpu_scan_ext_entry,
             self.ed_gpu_hash_batch_base_entry, self.ed_gpu_hash_batch_ext_entry,
@@ -4289,23 +4563,27 @@ bn_setPreset(window.__bn_preset);
             self.sp_audio_timeout, self.sp_audio_max_fetch_kb, self.sp_audio_scan_max_results,
             self.sp_audio_scan_expand_pages, self.sp_audio_scan_max_links,
             self.sp_python_bridge_port,
+
             self.p2_open_threads,
 
-            # CPU config
+            self.sp_monero_rpc_verifier_threads,
+            self.monero_rpc_after_seq,
+            self.monero_rpc_timeout_ms,
+            self.monero_rpc_lease_count,
+            self.monero_rpc_submit_expected_job_seq,
+
             self.sp_cpu_hash_threads, self.sp_cpu_scan_threads,
             self.sp_cpu_scan_min_iters, self.sp_cpu_max_input_kb,
             self.sp_cpu_max_batch_items, self.sp_cpu_max_batch_total_kb,
             self.sp_cpu_max_scan_iters, self.sp_cpu_max_scan_results,
             self.sp_cpu_nonce_offset_cfg, self.sp_cpu_bench_iters_cfg, self.sp_cpu_bench_loops_cfg,
 
-            # CPU UI fields
             self.cpu_batch_threads,
             self.cpu_scan_nonce_offset, self.cpu_scan_start_nonce, self.cpu_scan_iters,
             self.cpu_scan_max_results, self.cpu_scan_threads,
             self.cpu_bench_nonce_offset, self.cpu_bench_start_nonce, self.cpu_bench_iters,
             self.cpu_bench_loops, self.cpu_bench_threads,
 
-            # GPU config/ui
             self.sp_gpu_max_kernel_kb, self.sp_gpu_max_blob_bytes, self.sp_gpu_max_seed_bytes,
             self.sp_gpu_max_results, self.sp_gpu_default_iters, self.sp_gpu_local_work_size,
             self.gpu_platform_index, self.gpu_device_index,
@@ -4323,7 +4601,7 @@ bn_setPreset(window.__bn_preset);
         for cb in (
             self.cb_proxy, self.cb_gateway,
             self.cb_api, self.cb_api_media, self.cb_api_randomx, self.cb_api_web,
-            self.cb_api_p2pool, self.cb_api_webworker, self.cb_api_process,
+            self.cb_api_p2pool, self.cb_api_monero_rpc, self.cb_api_webworker, self.cb_api_process,
             self.cb_api_network, self.cb_network_set_ipv4, self.cb_api_audio, self.cb_api_python,
             self.cb_api_cpu,
             self.cb_api_gpu, self.cb_gpu_local_only, self.cb_gpu_auto_select, self.cb_gpu_auto_build,
@@ -4342,6 +4620,14 @@ bn_setPreset(window.__bn_preset);
         self.p2_open_wallet.textChanged.connect(self._schedule_save)
         self.p2_open_rig.textChanged.connect(self._schedule_save)
         self.p2_open_extra_json.textChanged.connect(self._schedule_save)
+
+        self.monero_rpc_job_push_json.textChanged.connect(self._schedule_save)
+        self.monero_rpc_miner_id.textChanged.connect(self._schedule_save)
+        self.monero_rpc_release_lease_id.textChanged.connect(self._schedule_save)
+        self.monero_rpc_submit_miner_id.textChanged.connect(self._schedule_save)
+        self.monero_rpc_submit_job_id.textChanged.connect(self._schedule_save)
+        self.monero_rpc_submit_nonce.textChanged.connect(self._schedule_save)
+        self.monero_rpc_submit_result.textChanged.connect(self._schedule_save)
 
         self.cpu_seed_hex.textChanged.connect(self._schedule_save)
         self.cpu_data.textChanged.connect(self._schedule_save)
@@ -4400,6 +4686,7 @@ bn_setPreset(window.__bn_preset);
             self.cb_api_randomx.setChecked(bool(j.get("api_randomx", True)))
             self.cb_api_web.setChecked(bool(j.get("api_web", True)))
             self.cb_api_p2pool.setChecked(bool(j.get("api_p2pool", False)))
+            self.cb_api_monero_rpc.setChecked(bool(j.get("api_monero_rpc", False)))
             self.cb_api_webworker.setChecked(bool(j.get("api_webworker", False)))
             self.cb_api_process.setChecked(bool(j.get("api_process", False)))
             self.cb_api_network.setChecked(bool(j.get("api_network", True)))
@@ -4409,6 +4696,11 @@ bn_setPreset(window.__bn_preset);
 
             self.ed_randomx_dll.setText(j.get("randomx_dll", self.ed_randomx_dll.text()))
             self.ed_p2pool_extra.setText(j.get("p2pool_extra", self.ed_p2pool_extra.text()))
+            self.ed_monero_rpc_dll.setText(j.get("monero_rpc_dll", self.ed_monero_rpc_dll.text()))
+            self.sp_monero_rpc_verifier_threads.setValue(
+                int(j.get("monero_rpc_verifier_threads", self.sp_monero_rpc_verifier_threads.value()))
+            )
+            self.ed_monero_rpc_extra.setText(j.get("monero_rpc_extra", self.ed_monero_rpc_extra.text()))
             self.ed_network_wintun_dll.setText(j.get("network_wintun_dll", self.ed_network_wintun_dll.text()))
             self.ed_network_iface.setText(j.get("network_iface", self.ed_network_iface.text()))
             self.cb_network_set_ipv4.setChecked(bool(j.get("network_set_ipv4", False)))
@@ -4445,7 +4737,6 @@ bn_setPreset(window.__bn_preset);
             self.ed_python_blocknet_prefix.setText(j.get("python_blocknet_prefix", self.ed_python_blocknet_prefix.text()))
             self.ed_python_headers_json.setText(j.get("python_headers_json", self.ed_python_headers_json.text()))
 
-            # CPU load
             self.ed_cpu_dll.setText(j.get("cpu_dll", self.ed_cpu_dll.text()))
             self.sp_cpu_hash_threads.setValue(int(j.get("cpu_hash_threads", self.sp_cpu_hash_threads.value())))
             self.sp_cpu_scan_threads.setValue(int(j.get("cpu_scan_threads", self.sp_cpu_scan_threads.value())))
@@ -4536,6 +4827,32 @@ bn_setPreset(window.__bn_preset);
             self.p2_open_threads.setValue(int(j.get("p2_open_threads", self.p2_open_threads.value())))
             self.p2_open_extra_json.setPlainText(j.get("p2_open_extra_json", self.p2_open_extra_json.toPlainText()))
 
+            self.monero_rpc_job_push_json.setPlainText(
+                j.get("monero_rpc_job_push_json", self.monero_rpc_job_push_json.toPlainText())
+            )
+            self.monero_rpc_miner_id.setText(j.get("monero_rpc_miner_id", self.monero_rpc_miner_id.text()))
+            self.monero_rpc_after_seq.setValue(int(j.get("monero_rpc_after_seq", self.monero_rpc_after_seq.value())))
+            self.monero_rpc_timeout_ms.setValue(int(j.get("monero_rpc_timeout_ms", self.monero_rpc_timeout_ms.value())))
+            self.monero_rpc_lease_count.setValue(int(j.get("monero_rpc_lease_count", self.monero_rpc_lease_count.value())))
+            self.monero_rpc_release_lease_id.setText(
+                j.get("monero_rpc_release_lease_id", self.monero_rpc_release_lease_id.text())
+            )
+            self.monero_rpc_submit_miner_id.setText(
+                j.get("monero_rpc_submit_miner_id", self.monero_rpc_submit_miner_id.text())
+            )
+            self.monero_rpc_submit_job_id.setText(
+                j.get("monero_rpc_submit_job_id", self.monero_rpc_submit_job_id.text())
+            )
+            self.monero_rpc_submit_expected_job_seq.setValue(
+                int(j.get("monero_rpc_submit_expected_job_seq", self.monero_rpc_submit_expected_job_seq.value()))
+            )
+            self.monero_rpc_submit_nonce.setText(
+                j.get("monero_rpc_submit_nonce", self.monero_rpc_submit_nonce.text())
+            )
+            self.monero_rpc_submit_result.setText(
+                j.get("monero_rpc_submit_result", self.monero_rpc_submit_result.text())
+            )
+
             self.webw_base.setText(j.get("webw_base", self.webw_base.text()))
             self.webw_send_auth.setChecked(bool(j.get("webw_send_auth", self.webw_send_auth.isChecked())))
 
@@ -4614,6 +4931,7 @@ bn_setPreset(window.__bn_preset);
                 "api_randomx": bool(self.cb_api_randomx.isChecked()),
                 "api_web": bool(self.cb_api_web.isChecked()),
                 "api_p2pool": bool(self.cb_api_p2pool.isChecked()),
+                "api_monero_rpc": bool(self.cb_api_monero_rpc.isChecked()),
                 "api_webworker": bool(self.cb_api_webworker.isChecked()),
                 "api_process": bool(self.cb_api_process.isChecked()),
                 "api_network": bool(self.cb_api_network.isChecked()),
@@ -4624,6 +4942,9 @@ bn_setPreset(window.__bn_preset);
 
                 "randomx_dll": self.ed_randomx_dll.text().strip(),
                 "p2pool_extra": self.ed_p2pool_extra.text().strip(),
+                "monero_rpc_dll": self.ed_monero_rpc_dll.text().strip(),
+                "monero_rpc_verifier_threads": int(self.sp_monero_rpc_verifier_threads.value()),
+                "monero_rpc_extra": self.ed_monero_rpc_extra.text().strip(),
 
                 "web_block_private": bool(self.cb_web_block_private.isChecked()),
                 "web_allow_http": bool(self.cb_web_allow_http.isChecked()),
@@ -4661,7 +4982,6 @@ bn_setPreset(window.__bn_preset);
                 "python_blocknet_prefix": self.ed_python_blocknet_prefix.text().strip(),
                 "python_headers_json": self.ed_python_headers_json.text().strip(),
 
-                # CPU config persisted
                 "cpu_dll": self.ed_cpu_dll.text().strip(),
                 "cpu_hash_threads": int(self.sp_cpu_hash_threads.value()),
                 "cpu_scan_threads": int(self.sp_cpu_scan_threads.value()),
@@ -4711,7 +5031,6 @@ bn_setPreset(window.__bn_preset);
                 "gpu_bench_entry": self.ed_gpu_bench_entry.text().strip(),
                 "gpu_build_options": self.ed_gpu_build_options.text().strip(),
 
-                # optional legacy mirrors
                 "gpu_scan_entry": self.ed_gpu_scan_base_entry.text().strip(),
                 "gpu_hash_batch_entry": self.ed_gpu_hash_batch_base_entry.text().strip(),
 
@@ -4740,6 +5059,18 @@ bn_setPreset(window.__bn_preset);
                 "p2_open_rig": self.p2_open_rig.text().strip(),
                 "p2_open_threads": int(self.p2_open_threads.value()),
                 "p2_open_extra_json": self.p2_open_extra_json.toPlainText(),
+
+                "monero_rpc_job_push_json": self.monero_rpc_job_push_json.toPlainText(),
+                "monero_rpc_miner_id": self.monero_rpc_miner_id.text().strip(),
+                "monero_rpc_after_seq": int(self.monero_rpc_after_seq.value()),
+                "monero_rpc_timeout_ms": int(self.monero_rpc_timeout_ms.value()),
+                "monero_rpc_lease_count": int(self.monero_rpc_lease_count.value()),
+                "monero_rpc_release_lease_id": self.monero_rpc_release_lease_id.text().strip(),
+                "monero_rpc_submit_miner_id": self.monero_rpc_submit_miner_id.text().strip(),
+                "monero_rpc_submit_job_id": self.monero_rpc_submit_job_id.text().strip(),
+                "monero_rpc_submit_expected_job_seq": int(self.monero_rpc_submit_expected_job_seq.value()),
+                "monero_rpc_submit_nonce": self.monero_rpc_submit_nonce.text().strip(),
+                "monero_rpc_submit_result": self.monero_rpc_submit_result.text().strip(),
 
                 "webw_base": self.webw_base.text().strip(),
                 "webw_send_auth": bool(self.webw_send_auth.isChecked()),
